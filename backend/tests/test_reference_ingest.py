@@ -221,6 +221,47 @@ def test_ingest_channel_computes_median_outliers_and_roles(
     assert len(by_role.get(ReferenceVideoRole.NONE, [])) == 3
 
 
+def test_assign_roles_or_threshold_not_limited_to_rank_cutoff(
+    db: Session, _script: _Script
+) -> None:
+    """Etapa 1, item 4: 'bombou' is top-percentile OR multiplier>=threshold,
+    not AND — a video at 3.1x the median must get the role even if the
+    top-10%-by-rank cutoff alone would only have room for fewer videos."""
+    _add_search_provider(db)
+    project = Project(name="Channel Project 2", niche="x", language="English")
+    db.add(project)
+    db.commit()
+    source = _make_source(
+        db, "https://www.youtube.com/channel/UCtest0000000000", project_id=project.id
+    )
+    source.kind = ReferenceKind.CHANNEL
+    db.commit()
+
+    # 20 typical videos (median=1000) + 4 videos between 3.1x and 3.4x median.
+    # The top-10%-by-rank cutoff alone (ceil(24*0.10) == 3) would only cover
+    # 3 of these 4 — the OR with the multiplier threshold must catch all 4.
+    views = [1000] * 20 + [3100, 3200, 3300, 3400]
+    videos_info = [_video_info(f"v{i}", v) for i, v in enumerate(views)]
+
+    _script.set("resolve", ResolvedRef(kind="channel", external_id="UCtest0000000000"))
+    _script.set(
+        "channel",
+        ChannelInfo(
+            external_id="UCtest0000000000", title="T", uploads_playlist_id="UU", subscriber_count=1
+        ),
+    )
+    _script.set("channel_videos", videos_info)
+
+    ingest_reference(db, source.id)
+
+    db.refresh(source)
+    assert source.status == ReferenceStatus.READY, source.error
+    rows = db.query(ReferenceVideo).filter_by(source_id=source.id).all()
+    top = [r for r in rows if r.role == ReferenceVideoRole.TOP]
+    assert len(top) == 4
+    assert {r.views for r in top} == {3100, 3200, 3300, 3400}
+
+
 def test_quota_exceeded_marks_source_failed_with_real_reason(
     db: Session, _script: _Script
 ) -> None:

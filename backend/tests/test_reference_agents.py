@@ -248,3 +248,138 @@ def test_trend_agent_discover_with_no_evidence_still_works(db: Session) -> None:
 
     assert directions[0].title == "General niche idea"
     assert directions[0].evidence.video_external_id is None
+
+
+def test_trend_agent_regenerates_once_then_accepts_a_clean_rewrite(db: Session) -> None:
+    """Etapa 1: the exact kind of invented-number text reported in the
+    product's own screenshots ("2.5x acima da média de retenção...") must be
+    rejected; the agent regenerates once, and a clean rewrite is accepted."""
+    _add_llm_provider(db)
+    project = _project(db, niche="mystery")
+
+    bad = json.dumps(
+        [
+            {
+                "title": "O mistério de um evento qualquer",
+                "why": "2.5x acima da média de retenção do segmento de mistério",
+                "approach": "...",
+            }
+        ]
+    )
+    good = json.dumps([{"title": "Ideia alternativa", "why": "", "approach": "ideia original"}])
+    calls: list[str] = []
+
+    class _BadThenGoodLLM(LLMProvider):
+        provider_key = "mock_reference_llm"
+
+        def generate(self, request: LLMRequest) -> LLMResponse:
+            calls.append(request.prompt)
+            return LLMResponse(text=bad if len(calls) == 1 else good, usage=Usage())
+
+    from app.providers.registry import _REGISTRY
+
+    original = _REGISTRY[(Capability.LLM, "mock_reference_llm")]
+    _REGISTRY[(Capability.LLM, "mock_reference_llm")] = _BadThenGoodLLM
+    try:
+        ctx = ReferenceAgentContext(db, project)
+        directions = TrendAgent(ctx).discover("mystery", opportunities=None)
+    finally:
+        _REGISTRY[(Capability.LLM, "mock_reference_llm")] = original
+
+    assert len(calls) == 2  # exactly one regeneration
+    assert "retenção" not in directions[0].why.lower()
+    assert "2.5x" not in directions[0].why and "2,5x" not in directions[0].why
+
+
+def test_trend_agent_sanitizes_text_still_bad_after_retry(db: Session) -> None:
+    """If the model keeps inventing numbers/uncollected metrics even after
+    one retry, the final text must be the safe, code-written fallback —
+    never the model's text, and never a number that isn't grounded."""
+    _add_llm_provider(db)
+    project = _project(db, niche="mystery")
+    _SCRIPT["next"] = json.dumps(
+        [{"title": "T", "why": "3.2x o tráfego orgânico de vídeos de true crime", "approach": ""}]
+    )
+
+    ctx = ReferenceAgentContext(db, project)
+    directions = TrendAgent(ctx).discover("mystery", opportunities=None)
+
+    assert "tráfego" not in directions[0].why.lower()
+    assert "3.2x" not in directions[0].why
+    assert directions[0].why == "Ideia geral, sem dado de desempenho."
+
+
+def test_trend_agent_builds_candidates_from_series_and_clusters_in_facts(db: Session) -> None:
+    """The LLM only labels a closed, code-built candidate list — it never
+    invents the subject itself when channel facts are available."""
+    from app.services.channel_facts import compute_channel_facts
+
+    _add_llm_provider(db)
+    project = _project(db, niche="amazon wildlife")
+    videos = [
+        _reference_video(
+            external_id=f"s{i}",
+            title=f"Os Piores Encontros {suffix}",
+            views=200000 - i * 1000,
+            outlier_score=5.9 - i * 0.1,
+            role=ReferenceVideoRole.TOP,
+        )
+        for i, suffix in enumerate(["na Amazônia", "de Caçadores", "em Florestas", "com Animais"])
+    ]
+    facts = compute_channel_facts(videos)
+    assert facts.series and facts.series[0].label == "Os Piores Encontros"
+
+    _SCRIPT["next"] = json.dumps(
+        [{"candidate_id": "series:Os Piores Encontros", "title": "Um novo capítulo da série", "why": "5.9x a mediana do canal", "approach": "..."}]
+    )
+
+    ctx = ReferenceAgentContext(db, project)
+    directions = TrendAgent(ctx).discover("amazon wildlife", videos, facts=facts)
+
+    assert len(directions) == 1
+    assert directions[0].evidence.multiplier == pytest.approx(5.9)
+    assert directions[0].evidence.video_external_id == "s0"
+
+
+def test_style_profiler_forces_accepted_false_for_null_or_low_confidence(db: Session) -> None:
+    """Etapa 1, item 3: the LLM is asked to always write accepted=true — the
+    real accept/reject decision happens in code, not from the model's say-so."""
+    _add_llm_provider(db)
+    project = _project(db)
+    _SCRIPT["next"] = json.dumps(
+        {
+            "roteiro": {
+                "narrador": {
+                    "value": None,
+                    "why": "precisa do arquivo de midia",
+                    "confidence": "low",
+                    "accepted": True,
+                },
+                "tom": {"value": "casual", "why": "x", "confidence": "low", "accepted": True},
+                "gancho_inicial": {
+                    "value": "pergunta direta",
+                    "why": "y",
+                    "confidence": "high",
+                    "accepted": True,
+                },
+            },
+            "titulos": {},
+            "imagens": {},
+            "ritmo": {},
+            "legenda": {},
+            "musica": {},
+            "voz": {},
+            "nao_replicavel": [],
+            "meta": {},
+        }
+    )
+    videos = [
+        _reference_video(external_id="v1", role=ReferenceVideoRole.TOP, analysis={"a": "b"})
+    ]
+
+    ctx = ReferenceAgentContext(db, project)
+    data = StyleProfilerAgent(ctx).build_profile(videos, had_transcript=False)
+
+    assert data.roteiro["narrador"].accepted is False  # value is None
+    assert data.roteiro["tom"].accepted is False  # confidence == "low"
+    assert data.roteiro["gancho_inicial"].accepted is True  # has a value + high confidence

@@ -173,6 +173,15 @@ Per-video fiches as JSON, each tagged with its role (top = big outlier / what
 blew up, bottom = underperformed, representative = typical for the channel):
 {fiches_json}
 
+Code-computed channel facts as JSON — series (installments of the same
+format, e.g. "Vol.2"/"Parte 3" or a shared title prefix), topic clusters,
+title patterns, upload cadence, and top-vs-bottom differences. These are the
+ONLY numbers you may use for numeric claims anywhere in your answer — do not
+estimate, round differently, or invent any number that isn't in here. If a
+series or cluster is present, prefer naming it specifically (e.g. a real
+recurring series title) over a generic placeholder like "[Local/Evento]":
+{facts_json}
+
 Where you can, contrast what the "top" videos do differently from the
 "bottom" ones. For "nao_replicavel", pick and translate into {language} only
 the limitations below that genuinely seem to apply here — don't invent
@@ -210,19 +219,24 @@ CRITICAL RULE: {anti_copy_rule}
 Niche: {niche}
 Language for every text value below: {language}
 
-Evidence of what performs well (may be empty — if so, rely on general
-knowledge of this niche instead):
-{opportunities_json}
+Closed list of real, code-computed candidates (may be empty — if so, write a
+general idea for the niche instead, with NO numbers anywhere in your answer):
+{candidates_json}
 
-For each direction, explain the opportunity with a concrete number when you
-have one (e.g. "performed 10.1x this channel's median views").
+Write ONE direction PER candidate, in the same order, each referencing its
+"candidate_id" exactly as given. If the list is empty, return exactly one
+general-idea direction with "candidate_id": null.
+
+Rules for numbers: use a number ONLY if it is the candidate's own "multiplier"
+or "views" value (you may round it, e.g. 10.1 -> "10x"). Never invent a
+number. Never mention retention, CTR, click-through rate, traffic, or RPM —
+this system never measures any of those.
 
 Return ONLY a JSON array, each item:
-{{"title": "an original video subject + angle, written in {language}",
-"why": "the opportunity, with a number when available, in {language}",
-"approach": "a short, original angle to take, in {language} — never a rewrite of the source",
-"evidence": {{"video_external_id": "..." or null, "views": 0 or null,
-"multiplier": 0.0 or null, "url": "..." or null}}}}"""
+{{"candidate_id": "..." or null,
+"title": "an original video subject + angle, written in {language}",
+"why": "the opportunity, with the candidate's own number when it has one, in {language}",
+"approach": "a short, original angle to take, in {language} — never a rewrite of the source"}}"""
 
 DEFAULT_PROMPTS: dict[AgentType, str] = {
     AgentType.RESEARCH: _RESEARCH_PROMPT,

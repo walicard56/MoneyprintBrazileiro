@@ -7,7 +7,7 @@ import re
 import uuid
 
 from app.core.config import settings
-from app.core.enums import AgentType, Capability, Stage, Status
+from app.core.enums import AgentType, Capability, Stage
 from app.providers.base import ImageRequest, STTRequest, TTSRequest
 from app.providers.router import NoProviderAvailable
 from app.agents.base import BaseAgent

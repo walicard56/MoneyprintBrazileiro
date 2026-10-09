@@ -6,6 +6,31 @@
 // mostly read `pt.section.key` directly (type-checked); `t()` exists for the
 // rare spot that needs a dynamic path.
 
+/** "161031" -> "161 mil", "2500000" -> "2,5 mi" — avoids showing raw decimals
+ * from an even-count median (e.g. "161.031,5") and matches how view counts
+ * are normally written in pt-BR. */
+export function formatCompactViews(n: number): string {
+  const rounded = Math.round(n);
+  if (rounded >= 1_000_000) return `${(rounded / 1_000_000).toFixed(1).replace(".", ",")} mi`;
+  if (rounded >= 10_000) return `${Math.round(rounded / 1000)} mil`;
+  if (rounded >= 1_000) return `${(rounded / 1000).toFixed(1).replace(".", ",")} mil`;
+  return rounded.toLocaleString("pt-BR");
+}
+
+/** Human-readable age from an ISO timestamp, e.g. "há 12 dias". */
+export function formatAge(publishedAt: string | null): string {
+  if (!publishedAt) return "";
+  const days = Math.floor((Date.now() - new Date(publishedAt).getTime()) / 86_400_000);
+  if (days < 1) return "hoje";
+  if (days < 30) return `há ${days} dia${days === 1 ? "" : "s"}`;
+  if (days < 365) {
+    const months = Math.round(days / 30);
+    return `há ${months} ${months === 1 ? "mês" : "meses"}`;
+  }
+  const years = Math.round(days / 365);
+  return `há ${years} ${years === 1 ? "ano" : "anos"}`;
+}
+
 export const pt = {
   nav: {
     canais: "Canais",
@@ -58,9 +83,10 @@ export const pt = {
       representative: "representativo",
       none: "",
     },
-    statsMedian: (n: number) => `mediana de views: ${n.toLocaleString("pt-BR")}`,
+    statsMedian: (n: number) => `mediana de views: ${formatCompactViews(n)}`,
     statsCount: (n: number) => `${n} vídeos`,
     outlierMultiplier: (n: number) => `${n.toFixed(1)}×`,
+    viewsPerDay: (n: number) => `${formatCompactViews(n)} views/dia`,
     pasteTranscript: "Colar transcrição",
     uploadTranscript: "Enviar .srt/.txt",
     transcriptSaved: "Transcrição salva",
@@ -75,6 +101,9 @@ export const pt = {
     learnedTitle: "O que o estúdio aprendeu",
     whyPrefix: "Por quê: ",
     confidenceLabels: { low: "confiança baixa", medium: "confiança média", high: "confiança alta" },
+    missingData: "falta dado",
+    missingDataHint: "Precisa de mais vídeos ou do arquivo de mídia para medir isso.",
+    sendVideoToMeasure: "Enviar vídeo para medir",
     notReplicableTitle: "O que o estúdio ainda não faz igual",
     useOnChannel: "Usar neste canal",
     createChannelWithStyle: "Criar um canal com este estilo",

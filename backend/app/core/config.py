@@ -97,6 +97,12 @@ class Settings(BaseSettings):
     enable_unofficial_transcripts: bool = False
     # Reference transcripts are deleted right after analysis unless this is set.
     keep_transcripts: bool = False
+    # A video is "bombou" (role=TOP) if it's in this top percentile of the
+    # channel by outlier_score, OR its multiplier reaches the threshold below
+    # — an OR, not an AND, so a strong multiplier is never hidden just
+    # because too many other videos also did well that month.
+    reference_top_percentile: float = 0.10
+    reference_top_multiplier_threshold: float = 3.0
 
     @property
     def broker_url(self) -> str:

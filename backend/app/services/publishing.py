@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.core.enums import Capability, LogLevel, Platform, Status
+from app.core.enums import Capability, LogLevel, Status
 from app.db.models import Account, Publication, Video
 from app.providers.base import PublishRequest, PublishResponse
 from app.providers.router import NoProviderAvailable, ProviderRouter

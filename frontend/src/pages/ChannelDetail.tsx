@@ -24,7 +24,7 @@ import {
   Textarea,
 } from "@/components/ui";
 import { Modal, ModalHeader } from "@/components/Modal";
-import { pt } from "@/i18n/ptBR";
+import { formatAge, formatCompactViews, pt } from "@/i18n/ptBR";
 
 const IN_PROGRESS = new Set(["pending", "fetching", "analyzing"]);
 
@@ -75,10 +75,12 @@ function ReferenceVideoRow({ video, sourceId }: { video: ReferenceVideo; sourceI
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm text-slate-200">{video.title}</div>
         <div className="flex items-center gap-2 text-xs text-slate-500">
-          <span>{video.views.toLocaleString("pt-BR")} views</span>
+          <span>{formatCompactViews(video.views)} views</span>
           {video.outlier_score != null && (
             <span>· {pt.references.outlierMultiplier(video.outlier_score)}</span>
           )}
+          {video.views_per_day != null && <span>· {pt.references.viewsPerDay(video.views_per_day)}</span>}
+          {video.published_at && <span>· {formatAge(video.published_at)}</span>}
           {roleLabel && <Tag color={video.role === "top" ? "emerald" : video.role === "bottom" ? "amber" : "slate"}>{roleLabel}</Tag>}
           {video.transcript_status !== "none" && <Tag color="violet">{pt.references.transcriptSaved}</Tag>}
         </div>
@@ -245,12 +247,31 @@ function StyleItemRow({
   path,
   item,
   onToggle,
+  onMissingData,
 }: {
   path: string;
   item: StyleProfileItem;
   onToggle: (path: string, accepted: boolean) => void;
+  onMissingData: () => void;
 }) {
-  const value = Array.isArray(item.value) ? item.value.join(", ") : item.value == null ? "—" : String(item.value);
+  if (item.value == null) {
+    return (
+      <div className="flex items-start justify-between gap-3 border-b border-white/5 py-2.5 last:border-0">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Tag color="slate">{pt.style.missingData}</Tag>
+            {item.why && <span className="text-xs text-slate-500">{item.why}</span>}
+          </div>
+          <div className="mt-0.5 text-xs text-slate-500">{pt.style.missingDataHint}</div>
+        </div>
+        <Button variant="ghost" onClick={onMissingData}>
+          {pt.style.sendVideoToMeasure}
+        </Button>
+      </div>
+    );
+  }
+
+  const value = Array.isArray(item.value) ? item.value.join(", ") : String(item.value);
   return (
     <div className="flex items-start gap-3 border-b border-white/5 py-2.5 last:border-0">
       <input
@@ -312,7 +333,7 @@ function CreateChannelModal({ profileId, onClose }: { profileId: string; onClose
   );
 }
 
-function StyleTab({ projectId }: { projectId: string }) {
+function StyleTab({ projectId, onGoToReferences }: { projectId: string; onGoToReferences: () => void }) {
   const qc = useQueryClient();
   const [creatingChannel, setCreatingChannel] = useState(false);
 
@@ -375,7 +396,13 @@ function StyleTab({ projectId }: { projectId: string }) {
                   {pt.style.sections[section]}
                 </h4>
                 {Object.entries(items).map(([key, item]) => (
-                  <StyleItemRow key={key} path={`${section}.${key}`} item={item} onToggle={toggleItem} />
+                  <StyleItemRow
+                    key={key}
+                    path={`${section}.${key}`}
+                    item={item}
+                    onToggle={toggleItem}
+                    onMissingData={onGoToReferences}
+                  />
                 ))}
               </div>
             );
@@ -463,7 +490,7 @@ function DirectionCard({ direction, index }: { direction: EditorialDirection; in
           className="mt-2 inline-block text-xs text-brand-300 hover:underline"
         >
           {pt.directions.source}
-          {direction.evidence.views != null ? ` · ${direction.evidence.views.toLocaleString("pt-BR")} views` : ""}
+          {direction.evidence.views != null ? ` · ${formatCompactViews(direction.evidence.views)} views` : ""}
         </a>
       )}
       {direction.status === "new" && (
@@ -598,7 +625,7 @@ export default function ChannelDetail() {
       </div>
 
       {tab === "referencias" && <ReferencesTab projectId={id} />}
-      {tab === "estilo" && <StyleTab projectId={id} />}
+      {tab === "estilo" && <StyleTab projectId={id} onGoToReferences={() => setTab("referencias")} />}
       {tab === "direcoes" && <DirectionsTab projectId={id} niche={p.niche} />}
       {tab === "videos" && <VideosTab projectId={id} />}
     </div>

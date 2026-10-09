@@ -10,6 +10,7 @@ calling thread/task (D7).
 
 from __future__ import annotations
 
+import math
 import statistics
 from datetime import datetime, timezone
 
@@ -35,6 +36,7 @@ from app.core.enums import (
 from app.db.models import EditorialDirection, Project, ReferenceSource, ReferenceVideo, StyleProfile
 from app.providers.base import ChannelInfo, SearchRequest, VideoInfo
 from app.providers.router import ProviderRouter
+from app.services.channel_facts import ChannelFacts, compute_channel_facts
 from app.services.logs import log
 from app.services.transcripts import delete_transcript, read_transcript
 
@@ -226,14 +228,17 @@ def _run_style_analysis(db: Session, source: ReferenceSource, router: ProviderRo
         )
         return
 
-    videos = list(
-        db.execute(
-            select(ReferenceVideo).where(
-                ReferenceVideo.source_id == source.id,
-                ReferenceVideo.role != ReferenceVideoRole.NONE,
-            )
-        ).scalars()
+    all_videos = list(
+        db.execute(select(ReferenceVideo).where(ReferenceVideo.source_id == source.id)).scalars()
     )
+    # Facts need the whole channel (series/cadence span videos that may not
+    # individually be top/bottom/representative) — at least 2 videos, or
+    # there's nothing to detect a pattern across.
+    facts: ChannelFacts | None = (
+        compute_channel_facts(all_videos) if len(all_videos) >= 2 else None
+    )
+
+    videos = [v for v in all_videos if v.role != ReferenceVideoRole.NONE]
     if not videos:
         return
 
@@ -281,7 +286,7 @@ def _run_style_analysis(db: Session, source: ReferenceSource, router: ProviderRo
 
     profiler = StyleProfilerAgent(ctx)
     try:
-        profile_data = profiler.build_profile(videos, had_transcript=had_transcript)
+        profile_data = profiler.build_profile(videos, had_transcript=had_transcript, facts=facts)
     except Exception as exc:  # noqa: BLE001 - keep the reference "ready" regardless
         log(
             db,
@@ -312,7 +317,7 @@ def _run_style_analysis(db: Session, source: ReferenceSource, router: ProviderRo
 
     trend = TrendAgent(ctx)
     try:
-        directions = trend.discover(project.niche if project else "", top_videos)
+        directions = trend.discover(project.niche if project else "", top_videos, facts=facts)
     except Exception as exc:  # noqa: BLE001 - keep the reference "ready" regardless
         log(
             db,
@@ -350,8 +355,10 @@ def _next_style_profile_version(db: Session, project_id: str) -> int:
 def _assign_roles(rows: list[ReferenceVideo], median_views: float) -> None:
     """Classify each scored video as top/bottom/representative/none.
 
-    - ``top``: the biggest outliers (top ~10%, and at least 3x the median) —
-      "what blew up".
+    - ``top`` ("bombou"): in the top ``reference_top_percentile`` of the
+      channel by outlier_score, OR at/above ``reference_top_multiplier_threshold``
+      — an OR, not an AND, so a video with a genuinely strong multiplier is
+      never excluded just because the percentile cutoff landed just above it.
     - ``bottom``: the worst ~10% — contrast for "what didn't land".
     - ``representative``: the ``reference_deep_count`` videos closest to the
       channel's typical performance (outlier_score near 1), which feed the
@@ -367,14 +374,18 @@ def _assign_roles(rows: list[ReferenceVideo], median_views: float) -> None:
         return
 
     n = len(scored)
-    top_n = max(1, n // 10)
+    percentile_n = max(1, math.ceil(n * settings.reference_top_percentile))
     bottom_n = max(1, n // 10)
 
     by_desc = sorted(scored, key=lambda pair: pair[1], reverse=True)
-    top = [r for r, score in by_desc[:top_n] if score >= 3.0]
+    percentile_ids = {r.id for r, _score in by_desc[:percentile_n]}
+    threshold_ids = {
+        r.id for r, score in scored if score >= settings.reference_top_multiplier_threshold
+    }
+    top_ids = percentile_ids | threshold_ids
+    top = [r for r, _score in scored if r.id in top_ids]
     for r in top:
         r.role = ReferenceVideoRole.TOP
-    top_ids = {r.id for r in top}
 
     by_asc = sorted(scored, key=lambda pair: pair[1])
     bottom = [r for r, _score in by_asc[:bottom_n] if r.id not in top_ids]
