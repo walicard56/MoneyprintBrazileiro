@@ -37,7 +37,9 @@ from app.db.models import EditorialDirection, Project, ReferenceSource, Referenc
 from app.providers.base import ChannelInfo, SearchRequest, VideoInfo
 from app.providers.router import ProviderRouter
 from app.services.channel_facts import ChannelFacts, compute_channel_facts
+from app.services.chapters import extract_chapters
 from app.services.logs import log
+from app.services.thumbnail_vision import analyze_thumbnails, summarize_top_vs_bottom_traits
 from app.services.transcripts import delete_transcript, read_transcript
 
 # Videos younger than this are excluded from the median-views calculation so a
@@ -122,6 +124,9 @@ def _ingest_single_video(db: Session, source: ReferenceSource, fetch) -> None:
             comments=info.comments,
             thumbnail_url=info.thumbnail_url,
             role=ReferenceVideoRole.REPRESENTATIVE,
+            chapters=[c.model_dump() for c in extract_chapters(info.description)],
+            tags=info.tags,
+            license=info.license,
         )
     )
     db.commit()
@@ -184,6 +189,9 @@ def _ingest_channel(db: Session, source: ReferenceSource, fetch) -> None:
                 thumbnail_url=info.thumbnail_url,
                 outlier_score=outlier_score,
                 views_per_day=views_per_day,
+                chapters=[c.model_dump() for c in extract_chapters(info.description)],
+                tags=info.tags,
+                license=info.license,
             )
         )
     db.add_all(rows)
@@ -270,6 +278,25 @@ def _run_style_analysis(db: Session, source: ReferenceSource, router: ProviderRo
         delete_transcript(video)
     db.commit()
 
+    thumbnail_traits: dict = {}
+    try:
+        descriptors = analyze_thumbnails(db, source.project_id, videos)
+        if descriptors:
+            for video in videos:
+                descriptor = descriptors.get(video.external_id)
+                if descriptor is not None:
+                    video.thumbnail_vision = descriptor.model_dump()
+            thumbnail_traits = summarize_top_vs_bottom_traits(descriptors, videos)
+            db.commit()
+    except Exception as exc:  # noqa: BLE001 - thumbnail analysis is always best-effort
+        log(
+            db,
+            f"Thumbnail vision analysis failed: {exc}",
+            level=LogLevel.WARNING,
+            stage="analyzing_videos",
+            project_id=source.project_id,
+        )
+
     if source.project_id is None:
         log(
             db,
@@ -286,7 +313,9 @@ def _run_style_analysis(db: Session, source: ReferenceSource, router: ProviderRo
 
     profiler = StyleProfilerAgent(ctx)
     try:
-        profile_data = profiler.build_profile(videos, had_transcript=had_transcript, facts=facts)
+        profile_data = profiler.build_profile(
+            videos, had_transcript=had_transcript, facts=facts, thumbnail_traits=thumbnail_traits
+        )
     except Exception as exc:  # noqa: BLE001 - keep the reference "ready" regardless
         log(
             db,

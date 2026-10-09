@@ -197,6 +197,7 @@ class StyleProfilerAgent(BaseServiceAgent):
         *,
         had_transcript: bool,
         facts: ChannelFacts | None = None,
+        thumbnail_traits: dict[str, Any] | None = None,
     ) -> StyleProfileData:
         fiches = [
             {"role": v.role.value, "views": v.views, "outlier_score": v.outlier_score, **v.analysis}
@@ -208,6 +209,7 @@ class StyleProfilerAgent(BaseServiceAgent):
             had_transcript=had_transcript,
             fiches_json=json.dumps(fiches, ensure_ascii=False),
             facts_json=facts.model_dump_json() if facts else "{}",
+            thumbnail_traits_json=json.dumps(thumbnail_traits or {}, ensure_ascii=False),
         )
         data = self.complete_json(prompt, TypeAdapter(StyleProfileData))
         _enforce_accepted_invariant(data)

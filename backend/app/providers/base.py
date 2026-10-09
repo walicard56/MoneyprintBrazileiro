@@ -99,6 +99,9 @@ class LLMRequest:
     temperature: float = 0.8
     max_tokens: int = 2000
     json_mode: bool = False
+    # Local file paths (D8). Empty by default, so every adapter's payload is
+    # byte-identical to before this field existed unless a caller opts in.
+    images: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -161,6 +164,12 @@ class SearchRequest:
       - "channel_videos": ``external_id`` (a channel id) -> up to ``limit``
         uploaded videos (most recent first) as ``list[VideoInfo]``, paginated
         via ``page_token``/``SearchResponse.next_page_token``.
+      - "search_videos" (N1, Etapa 2): ``query`` -> up to ``limit`` videos
+        ordered by views, within ``window_days``, optionally filtered by
+        ``language``/``region`` -> ``list[VideoInfo]``. Costs a real
+        ``search.list`` call (its own 100-calls/day quota bucket, D4) — the
+        caller (``services/discover.py``) is responsible for the daily cap,
+        not this provider.
     """
 
     op: str
@@ -168,6 +177,10 @@ class SearchRequest:
     external_id: str = ""
     limit: int = 200
     page_token: str = ""
+    query: str = ""
+    language: str = ""
+    region: str = ""
+    window_days: int = 365
 
 
 @dataclass
@@ -199,6 +212,13 @@ class VideoInfo:
     comments: int = 0
     thumbnail_url: str = ""
     channel_id: str = ""
+    # Etapa 2: same videos.list call, no extra quota cost. ``description`` is
+    # used transiently to extract chapters and then discarded — never
+    # persisted (D6/D3) — ``tags``/``license`` are plain public metadata,
+    # stored the same way ``title`` already is.
+    description: str = ""
+    tags: list[str] = field(default_factory=list)
+    license: str = ""  # "youtube" | "creativeCommon" | ""
 
 
 @dataclass
@@ -277,6 +297,12 @@ class BaseProvider(ABC):
 
 class LLMProvider(BaseProvider):
     capability = Capability.LLM
+    # D8: only Anthropic and OpenAI's own adapter actually forward
+    # LLMRequest.images — every other LLM adapter stays text-only until a
+    # separate decision extends vision further (see the product spec's
+    # section 10, item 3). Callers that need a vision call (e.g. thumbnail
+    # analysis) must pick a provider where this is True, not assume one.
+    supports_vision: ClassVar[bool] = False
 
     @abstractmethod
     def generate(self, request: LLMRequest) -> LLMResponse: ...

@@ -30,7 +30,11 @@ celery_app.conf.update(
         "dispatch-due-publications": {
             "task": "schedule.dispatch_due_publications",
             "schedule": 60.0,  # check once a minute
-        }
+        },
+        "capture-reference-video-snapshots": {
+            "task": "schedule.capture_reference_video_snapshots",
+            "schedule": 6 * 60 * 60.0,  # checkpoints are hours/days apart; checking every 6h is plenty
+        },
     },
 )
 

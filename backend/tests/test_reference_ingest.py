@@ -155,14 +155,51 @@ def test_ingest_single_video_reference(db: Session, _script: _Script) -> None:
     assert videos[0].views == 1234
 
 
-def _video_info(external_id: str, views: int, published_at: str = _OLD) -> VideoInfo:
+def _video_info(
+    external_id: str, views: int, published_at: str = _OLD, description: str = ""
+) -> VideoInfo:
     return VideoInfo(
         external_id=external_id,
         title=f"Video {external_id}",
         published_at=published_at,
         duration_s=60,
         views=views,
+        description=description,
     )
+
+
+def test_ingest_extracts_chapters_from_description(db: Session, _script: _Script) -> None:
+    """Etapa 2, item 1: chapters are extracted at ingestion time from the
+    (transient) description and persisted — the raw description itself is
+    never stored anywhere on the row."""
+    _add_search_provider(db)
+    source = _make_source(db, "https://www.youtube.com/watch?v=abc12345678")
+
+    description = "0:00 Intro\n1:30 - Meio\n3:00 Fim"
+    _script.set("resolve", ResolvedRef(kind="video", external_id="abc12345678"))
+    _script.set(
+        "video",
+        VideoInfo(
+            external_id="abc12345678",
+            title="A video with chapters",
+            published_at=_OLD,
+            duration_s=200,
+            views=1000,
+            description=description,
+            tags=["a", "b"],
+            license="creativeCommon",
+        ),
+    )
+
+    ingest_reference(db, source.id)
+
+    db.refresh(source)
+    assert source.status == ReferenceStatus.READY, source.error
+    video = db.query(ReferenceVideo).filter_by(source_id=source.id).one()
+    assert [c["title"] for c in video.chapters] == ["Intro", "Meio", "Fim"]
+    assert [c["start_s"] for c in video.chapters] == [0, 90, 180]
+    assert video.tags == ["a", "b"]
+    assert video.license == "creativeCommon"
 
 
 def test_ingest_channel_computes_median_outliers_and_roles(

@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     # because too many other videos also did well that month.
     reference_top_percentile: float = 0.10
     reference_top_multiplier_threshold: float = 3.0
+    # N1 (Etapa 2): caps real search.list calls spent on "Descobrir assuntos
+    # fortes" per day — search.list has its own 100-calls/day quota bucket
+    # (D4), shared with everything else that might use it.
+    discover_daily_searches: int = 20
 
     @property
     def broker_url(self) -> str:

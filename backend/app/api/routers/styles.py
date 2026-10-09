@@ -25,6 +25,7 @@ from app.schemas.reference import (
     StyleProfileRead,
     StyleProfileUpdate,
 )
+from app.services.discover import DiscoveryQuotaExceeded, discover_candidates
 
 router = APIRouter(tags=["styles"], dependencies=[AuthDep])
 
@@ -180,8 +181,23 @@ def discover_directions(
     if not ProviderRouter(db).specs(Capability.LLM):
         raise HTTPException(status_code=409, detail=NO_LLM_PROVIDER_MESSAGE)
 
+    # N1 (Etapa 2): a real per-niche search when a SEARCH provider is
+    # configured; with none, this stays exactly the Etapa 1 fallback (no
+    # candidates -> TrendAgent writes a general idea with no numbers).
+    try:
+        opportunities, facts = discover_candidates(
+            db,
+            payload.niche,
+            language=payload.language or project.language or "",
+            region=payload.region or "",
+            window_days=payload.window_days,
+            limit=payload.limit,
+        )
+    except DiscoveryQuotaExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
     ctx = ReferenceAgentContext(db, project)
-    items = TrendAgent(ctx).discover(payload.niche, opportunities=None)
+    items = TrendAgent(ctx).discover(payload.niche, opportunities or None, facts=facts)
 
     directions = [
         EditorialDirection(

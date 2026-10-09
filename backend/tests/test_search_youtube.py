@@ -171,6 +171,44 @@ def test_video_returns_parsed_info(monkeypatch: pytest.MonkeyPatch) -> None:
     assert info.thumbnail_url == "https://i.ytimg.com/vi/vid00000001/hqdefault.jpg"
 
 
+def test_fetch_video_extracts_description_tags_and_license(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Etapa 2, item 1: same videos.list call (no extra quota cost) — just
+    reading more fields already present in the ``snippet``/``status`` parts."""
+    item = {
+        **_VIDEO_ITEM,
+        "id": "vid00000002",
+        "snippet": {**_VIDEO_ITEM["snippet"], "description": "0:00 Intro\n1:00 Meio", "tags": ["a", "b"]},
+        "status": {"license": "creativeCommon"},
+    }
+
+    def _responder(path: str, params: dict) -> _FakeResponse:
+        assert "status" in params["part"]
+        return _FakeResponse(200, {"items": [item]})
+
+    _install(monkeypatch, _responder)
+    resp = search_youtube.YouTubeDataApiSearch(_spec()).fetch(
+        SearchRequest(op="video", external_id="vid00000002")
+    )
+    info = resp.data
+    assert info.description == "0:00 Intro\n1:00 Meio"
+    assert info.tags == ["a", "b"]
+    assert info.license == "creativeCommon"
+
+
+def test_fetch_video_defaults_metadata_extras_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _responder(path: str, params: dict) -> _FakeResponse:
+        return _FakeResponse(200, {"items": [_VIDEO_ITEM]})
+
+    _install(monkeypatch, _responder)
+    resp = search_youtube.YouTubeDataApiSearch(_spec()).fetch(
+        SearchRequest(op="video", external_id="vid00000001")
+    )
+    info = resp.data
+    assert info.description == ""
+    assert info.tags == []
+    assert info.license == ""
+
+
 def test_video_not_found_or_private_raises_invalid_request(monkeypatch: pytest.MonkeyPatch) -> None:
     """videos.list returns HTTP 200 with empty items for a private/deleted
     id — there's no 404 to catch, so the provider must check for this itself."""
@@ -278,6 +316,59 @@ def test_channel_videos_stops_at_limit_even_with_more_pages_available(
     )
     assert len(resp.data) == 2
     assert resp.next_page_token == "MORE_AVAILABLE"
+
+
+def test_search_videos_calls_search_then_batches_videos_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """N1 (Etapa 2): search.list (ordered by viewCount, date-windowed) for
+    candidate ids, then one batched videos.list for real stats — search.list
+    alone doesn't return view counts."""
+
+    def _responder(path: str, params: dict) -> _FakeResponse:
+        if path == "search":
+            assert params["q"] == "science facts"
+            assert params["type"] == "video"
+            assert params["order"] == "viewCount"
+            assert params["relevanceLanguage"] == "pt"
+            assert params["regionCode"] == "BR"
+            assert "publishedAfter" in params
+            return _FakeResponse(
+                200,
+                {
+                    "items": [
+                        {"id": {"videoId": "vid00000001"}},
+                        {"id": {"videoId": "vid00000002"}},
+                    ]
+                },
+            )
+        if path == "videos":
+            assert params["id"] == "vid00000001,vid00000002"
+            items = [{**_VIDEO_ITEM, "id": vid} for vid in params["id"].split(",")]
+            return _FakeResponse(200, {"items": items})
+        raise AssertionError(f"unexpected call: {path}")
+
+    _install(monkeypatch, _responder)
+    resp = search_youtube.YouTubeDataApiSearch(_spec()).fetch(
+        SearchRequest(op="search_videos", query="science facts", language="pt", region="BR", window_days=30)
+    )
+    assert [v.external_id for v in resp.data] == ["vid00000001", "vid00000002"]
+
+
+def test_search_videos_with_no_matches_returns_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _responder(path: str, params: dict) -> _FakeResponse:
+        assert path == "search"
+        return _FakeResponse(200, {"items": []})
+
+    _install(monkeypatch, _responder)
+    resp = search_youtube.YouTubeDataApiSearch(_spec()).fetch(
+        SearchRequest(op="search_videos", query="an extremely obscure niche")
+    )
+    assert resp.data == []
+
+
+def test_search_videos_without_query_is_not_retryable() -> None:
+    with pytest.raises(ProviderError) as exc_info:
+        search_youtube.YouTubeDataApiSearch(_spec()).fetch(SearchRequest(op="search_videos", query=""))
+    assert exc_info.value.retryable is False
 
 
 def test_quota_exceeded_is_rate_limit_with_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:

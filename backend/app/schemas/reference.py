@@ -162,3 +162,9 @@ class EditorialDirectionRead(BaseModel):
 
 class DirectionsDiscoverRequest(BaseModel):
     niche: str = Field(min_length=1, max_length=200)
+    # N1 (Etapa 2): when omitted, the endpoint falls back to the channel's
+    # own language and no region filter.
+    language: str | None = None
+    region: str | None = Field(default=None, max_length=10)
+    window_days: int = Field(default=365, ge=1, le=3650)
+    limit: int = Field(default=30, ge=1, le=50)

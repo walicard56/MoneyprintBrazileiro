@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 
 from app.providers.base import LLMProvider, LLMRequest, LLMResponse, ProviderError, Usage
 from app.providers.discovery import ModelInfo
 from app.providers.errors import ErrorCategory, classify, strategy_for
+from app.providers.image_utils import image_to_data_url
 from app.providers.registry import register
 from app.providers.retry import Timeouts, retrying
 
@@ -37,7 +40,13 @@ class _OpenAICompatible(LLMProvider):
         messages = []
         if request.system:
             messages.append({"role": "system", "content": request.system})
-        messages.append({"role": "user", "content": request.prompt})
+
+        user_content: Any = request.prompt
+        if request.images:
+            user_content = [{"type": "text", "text": request.prompt}]
+            for path in request.images:
+                user_content.append({"type": "image_url", "image_url": {"url": image_to_data_url(path)}})
+        messages.append({"role": "user", "content": user_content})
 
         payload: dict = {
             "model": self.spec.model,
@@ -170,6 +179,7 @@ class _OpenAICompatible(LLMProvider):
 )
 class OpenAILLM(_OpenAICompatible):
     provider_key = "openai"
+    supports_vision = True  # D8 — OpenRouter/Pollinations below stay text-only.
 
 
 @register(

@@ -27,7 +27,7 @@ official API. See ``backend/docs/youtube_reference_notes.md``.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -83,6 +83,10 @@ class YouTubeDataApiSearch(SearchProvider):
             return self._channel(request.external_id)
         if request.op == "channel_videos":
             return self._channel_videos(request.external_id, request.limit, request.page_token)
+        if request.op == "search_videos":
+            return self._search_videos(
+                request.query, request.language, request.region, request.window_days, request.limit
+            )
         raise ProviderError(f"Unknown search op: {request.op!r}", retryable=False)
 
     def health_check(self) -> bool:
@@ -150,7 +154,7 @@ class YouTubeDataApiSearch(SearchProvider):
         if not video_id:
             raise ProviderError("Missing video id.", retryable=False)
         body = self._get_json(
-            "videos", {"part": "snippet,contentDetails,statistics", "id": video_id}
+            "videos", {"part": "snippet,contentDetails,statistics,status", "id": video_id}
         )
         items = body.get("items") or []
         if not items:
@@ -230,12 +234,59 @@ class YouTubeDataApiSearch(SearchProvider):
         for i in range(0, len(video_ids), _BATCH_SIZE):
             batch = video_ids[i : i + _BATCH_SIZE]
             body = self._get_json(
-                "videos", {"part": "snippet,contentDetails,statistics", "id": ",".join(batch)}
+                "videos",
+                {"part": "snippet,contentDetails,statistics,status", "id": ",".join(batch)},
             )
             for item in body.get("items") or []:
                 videos.append(_video_info_from_item(item))
 
         return SearchResponse(data=videos, usage=Usage(), next_page_token=next_token)
+
+    def _search_videos(
+        self, query: str, language: str, region: str, window_days: int, limit: int
+    ) -> SearchResponse:
+        """N1 (Etapa 2): one ``search.list`` call (100 units — its own
+        100-calls/day bucket, D4) ordered by view count within a date
+        window, then one batched ``videos.list`` (1 unit) for real stats —
+        ``search.list`` alone doesn't return view counts."""
+        if not query:
+            raise ProviderError("Missing search query.", retryable=False)
+
+        published_after = (
+            datetime.now(timezone.utc) - timedelta(days=max(1, window_days))
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        params: dict = {
+            "part": "snippet",
+            "q": query,
+            "type": "video",
+            "order": "viewCount",
+            "publishedAfter": published_after,
+            "maxResults": max(1, min(limit, _BATCH_SIZE)),
+        }
+        if language:
+            params["relevanceLanguage"] = language
+        if region:
+            params["regionCode"] = region
+
+        body = self._get_json("search", params)
+        video_ids = [
+            str((item.get("id") or {}).get("videoId", ""))
+            for item in body.get("items") or []
+            if (item.get("id") or {}).get("videoId")
+        ]
+        if not video_ids:
+            return SearchResponse(data=[])
+
+        videos: list[VideoInfo] = []
+        for i in range(0, len(video_ids), _BATCH_SIZE):
+            batch = video_ids[i : i + _BATCH_SIZE]
+            stats_body = self._get_json(
+                "videos",
+                {"part": "snippet,contentDetails,statistics,status", "id": ",".join(batch)},
+            )
+            for item in stats_body.get("items") or []:
+                videos.append(_video_info_from_item(item))
+        return SearchResponse(data=videos)
 
     # --- helpers ---
 
@@ -314,6 +365,7 @@ def _video_info_from_item(item: dict) -> VideoInfo:
     snippet = item.get("snippet") or {}
     stats = item.get("statistics") or {}
     content = item.get("contentDetails") or {}
+    status = item.get("status") or {}
     thumbnails = snippet.get("thumbnails") or {}
     thumb = thumbnails.get("high") or thumbnails.get("medium") or thumbnails.get("default") or {}
     return VideoInfo(
@@ -326,6 +378,9 @@ def _video_info_from_item(item: dict) -> VideoInfo:
         comments=int(stats.get("commentCount", 0) or 0),
         thumbnail_url=thumb.get("url", ""),
         channel_id=snippet.get("channelId", ""),
+        description=snippet.get("description", ""),
+        tags=list(snippet.get("tags") or []),
+        license=status.get("license", ""),
     )
 
 

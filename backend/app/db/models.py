@@ -6,7 +6,7 @@ Replaces MoneyPrinterV2's loose JSON files in ``.mp/`` with a relational schema
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
@@ -585,8 +585,39 @@ class ReferenceVideo(UUIDMixin, TimestampMixin, Base):
     transcript_status: Mapped[TranscriptStatus] = mapped_column(
         SAEnum(TranscriptStatus), default=TranscriptStatus.NONE
     )
+    # Etapa 2: [{"title": "...", "start_s": 0}, ...], extracted from the
+    # description at ingestion time — the raw description itself is never
+    # stored (D3/D6), only this derived structure.
+    chapters: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    license: Mapped[str] = mapped_column(String(50), default="")
+    # Descriptors from analyzing the thumbnail with a vision LLM (D8) — never
+    # the image itself. {} when no vision provider was configured.
+    thumbnail_vision: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     source: Mapped["ReferenceSource"] = relationship(back_populates="videos")
+    snapshots: Mapped[list["ReferenceVideoSnapshot"]] = relationship(
+        back_populates="video", cascade="all, delete-orphan"
+    )
+
+
+class ReferenceVideoSnapshot(UUIDMixin, TimestampMixin, Base):
+    """A point-in-time view/like/comment count for a reference video (Etapa
+    2, item 2), captured at fixed checkpoints after it's first seen (24h,
+    72h, 7 days, then weekly) so early velocity can be measured and outliers
+    detected sooner than waiting for the next full channel refresh."""
+
+    __tablename__ = "reference_video_snapshots"
+
+    reference_video_id: Mapped[str] = mapped_column(
+        ForeignKey("reference_videos.id", ondelete="CASCADE"), index=True
+    )
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    likes: Mapped[int] = mapped_column(Integer, default=0)
+    comments: Mapped[int] = mapped_column(Integer, default=0)
+
+    video: Mapped["ReferenceVideo"] = relationship(back_populates="snapshots")
 
 
 class StyleProfile(UUIDMixin, TimestampMixin, Base):
@@ -640,3 +671,30 @@ class EditorialDirection(UUIDMixin, TimestampMixin, Base):
     status: Mapped[DirectionStatus] = mapped_column(
         SAEnum(DirectionStatus), default=DirectionStatus.NEW, index=True
     )
+
+
+class DiscoveryCache(Base):
+    """24h cache of a real per-niche search (N1, Etapa 2, item 5), keyed by
+    ``sha256(niche|language|region)`` — avoids repeating the same costly
+    ``search.list`` call (its own 100-calls/day quota bucket, D4) for a
+    discovery the user (or a retry) just ran a moment ago."""
+
+    __tablename__ = "discovery_cache"
+
+    cache_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    niche: Mapped[str] = mapped_column(String(200), default="")
+    language: Mapped[str] = mapped_column(String(50), default="")
+    region: Mapped[str] = mapped_column(String(10), default="")
+    # Serialized candidate videos (external_id/title/views/.../outlier_score).
+    candidates: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class DiscoverySearchLog(UUIDMixin, TimestampMixin, Base):
+    """One row per real ``search.list`` call spent on discovery — counted
+    against ``MP_DISCOVER_DAILY_SEARCHES`` per UTC day."""
+
+    __tablename__ = "discovery_search_log"

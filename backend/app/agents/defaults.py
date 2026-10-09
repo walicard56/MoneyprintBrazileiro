@@ -182,6 +182,12 @@ series or cluster is present, prefer naming it specifically (e.g. a real
 recurring series title) over a generic placeholder like "[Local/Evento]":
 {facts_json}
 
+Thumbnail traits (vision analysis, Etapa 2) that are meaningfully more common
+in "top" thumbnails than "bottom" ones — empty if no vision provider was
+configured, in which case leave "imagens.tipo"/related fields as you would
+with no visual data at all:
+{thumbnail_traits_json}
+
 Where you can, contrast what the "top" videos do differently from the
 "bottom" ones. For "nao_replicavel", pick and translate into {language} only
 the limitations below that genuinely seem to apply here — don't invent
