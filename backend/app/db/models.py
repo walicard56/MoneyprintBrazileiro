@@ -596,6 +596,10 @@ class ReferenceVideo(UUIDMixin, TimestampMixin, Base):
     # Descriptors from analyzing the thumbnail with a vision LLM (D8) — never
     # the image itself. {} when no vision provider was configured.
     thumbnail_vision: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # MinHash signature of the transcript (Etapa 4, item 4C) — computed
+    # while the transcript is still in memory, just before it's deleted;
+    # the transcript text itself is never stored here.
+    originality_signature: Mapped[list[int]] = mapped_column(JSON, default=list)
 
     source: Mapped["ReferenceSource"] = relationship(back_populates="videos")
     snapshots: Mapped[list["ReferenceVideoSnapshot"]] = relationship(

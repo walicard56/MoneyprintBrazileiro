@@ -15,6 +15,7 @@ from app.providers.base import LLMRequest, LLMResponse, Usage
 from app.providers.router import ProviderRouter
 from app.services import logs
 from app.services.agent_config import ResolvedAgentConfig, resolve_agent_config
+from app.services.skeleton import compile_skeleton_guidance, skeleton_from_config
 from app.services.style_guidance import compile_style_guidance
 
 # Injected into every agent prompt via {locked_notice} when the script is
@@ -60,6 +61,7 @@ class AgentContext:
             "structure": cfg.get("structure", "curiosity"),
             "style_guidance": compile_style_guidance(self.db, cfg.get("style_profile_id")),
             "locked_notice": _SCRIPT_LOCKED_NOTICE if cfg.get("script_locked") else "",
+            "skeleton_guidance": compile_skeleton_guidance(skeleton_from_config(cfg.get("skeleton"))),
         }
 
 

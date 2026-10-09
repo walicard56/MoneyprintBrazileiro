@@ -269,17 +269,20 @@ export function Select({
   onChange,
   options,
   className = "",
+  disabled = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
   className?: string;
+  disabled?: boolean;
 }) {
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={`${fieldClass} cursor-pointer ${className}`}
+      disabled={disabled}
+      className={`${fieldClass} ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"} ${className}`}
     >
       {options.map((o) => (
         <option key={o.value} value={o.value} className="bg-panel text-slate-100">

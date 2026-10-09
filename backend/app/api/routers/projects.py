@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import AuthDep, get_db
 from app.db.models import Project
+from app.schemas.production import ProductionDefaults
 from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
 
 router = APIRouter(prefix="/projects", tags=["projects"], dependencies=[AuthDep])
@@ -49,6 +50,31 @@ def update_project(
     db.commit()
     db.refresh(row)
     return row
+
+
+@router.get("/{project_id}/production-defaults", response_model=ProductionDefaults)
+def get_production_defaults(project_id: str, db: Session = Depends(get_db)) -> ProductionDefaults:
+    project = _get_or_404(db, project_id)
+    raw = (project.config or {}).get("production_defaults") or {}
+    return ProductionDefaults.model_validate(raw)
+
+
+@router.patch("/{project_id}/production-defaults", response_model=ProductionDefaults)
+def update_production_defaults(
+    project_id: str, payload: ProductionDefaults, db: Session = Depends(get_db)
+) -> ProductionDefaults:
+    """Merges into ``Project.config["production_defaults"]`` — never
+    replaces the whole ``config`` dict (that would risk wiping
+    ``active_style_profile_id`` set elsewhere)."""
+    project = _get_or_404(db, project_id)
+    existing = dict((project.config or {}).get("production_defaults") or {})
+    existing.update(payload.model_dump(exclude_none=True))
+
+    config = dict(project.config or {})
+    config["production_defaults"] = existing
+    project.config = config
+    db.commit()
+    return ProductionDefaults.model_validate(existing)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)

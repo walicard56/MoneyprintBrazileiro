@@ -36,6 +36,7 @@ Target duration: {duration} seconds
 Tone/style: {style}
 Narrative structure: {structure}
 {style_guidance}
+{skeleton_guidance}
 
 Rules:
 - Open with a strong hook in the first 2 seconds that creates curiosity.
@@ -67,6 +68,7 @@ Style: {style}
 Target total duration: {duration} seconds.
 {style_guidance}
 {locked_notice}
+{skeleton_guidance}
 
 For each scene provide: the exact narration substring for that scene, an
 approximate duration in seconds, a one-line visual description, and any

@@ -407,6 +407,24 @@ export interface EditorialDirection {
   updated_at: string;
 }
 
+// --- Padrões de produção do canal (Etapa 4, item 4.4) ---
+
+export interface ProductionDefaults {
+  structure?: string | null;
+  tone?: string | null;
+  voice?: string | null;
+  voice_speed?: number | null;
+  media_mode?: string | null;
+  image_video_ratio?: number | null;
+  subtitles_enabled?: boolean | null;
+  subtitle_style?: string | null;
+  subtitle_color?: string | null;
+  duration?: number | null;
+  aspect_ratio?: string | null;
+  music_enabled?: boolean | null;
+  music_volume?: number | null;
+}
+
 // --- Laboratório de vídeo (Etapa 3) ---
 
 export type LabRunStatus = "pending" | "running" | "ready" | "failed";

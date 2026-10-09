@@ -118,6 +118,15 @@ class Settings(BaseSettings):
     # of a platform ban/ToS issue is the project owner's own decision.
     enable_link_fetch: bool = False
 
+    # --- Originality / variation (Etapa 4, item 4C) ---
+    # A script this similar (MinHash-estimated Jaccard) to a learned
+    # reference's transcript pauses the pipeline for the user's own review.
+    reference_originality_threshold: float = 0.25
+    # How many of the channel's most recent videos a new one is compared
+    # against for structural repetition (variation_fingerprint).
+    variation_lookback: int = 5
+    variation_similarity_threshold: float = 0.6
+
     @property
     def broker_url(self) -> str:
         return self.celery_broker_url or self.redis_url

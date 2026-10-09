@@ -46,6 +46,7 @@ from app.providers.router import ProviderRouter
 from app.services.channel_facts import ChannelFacts, compute_channel_facts
 from app.services.chapters import extract_chapters
 from app.services.logs import log
+from app.services.originality import minhash_signature
 from app.services.thumbnail_vision import analyze_thumbnails, summarize_top_vs_bottom_traits
 from app.services.transcripts import delete_transcript, read_transcript
 
@@ -282,6 +283,11 @@ def _run_style_analysis(db: Session, source: ReferenceSource, router: ProviderRo
             )
             continue
         video.analysis = analysis.model_dump(mode="json")
+        if transcript:
+            # Only the signature survives (Etapa 4, item 4C) — computed
+            # here, while the transcript is still in memory, right before
+            # delete_transcript() below removes the text itself.
+            video.originality_signature = minhash_signature(transcript)
         delete_transcript(video)
     db.commit()
 

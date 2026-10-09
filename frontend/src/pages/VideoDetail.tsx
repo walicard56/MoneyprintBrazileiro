@@ -82,6 +82,8 @@ export default function VideoDetail() {
 
   const scriptLocked = Boolean(v.config?.script_locked);
   const awaitingApproval = v.status === "waiting_approval";
+  const originalityWarning = v.config?.originality_warning as { similarity: number } | undefined;
+  const variationHint = v.config?.variation_hint as { similarity: number } | undefined;
 
   return (
     <div>
@@ -99,6 +101,21 @@ export default function VideoDetail() {
 
       {v.error && (
         <Card className="mb-4 border-rose-500/40 bg-rose-500/5 font-mono text-xs text-rose-300">{v.error}</Card>
+      )}
+
+      {originalityWarning && (
+        <Card className="mb-4 border-amber-500/40 bg-amber-500/5">
+          <p className="text-sm font-semibold text-amber-300">
+            {pt.originality.warningTitle(Math.round(originalityWarning.similarity * 100))}
+          </p>
+          <p className="mt-1 text-xs text-amber-200/80">{pt.originality.warningHint}</p>
+        </Card>
+      )}
+      {variationHint && (
+        <Card className="mb-4 border-violet-500/30 bg-violet-500/5">
+          <p className="text-sm font-semibold text-violet-300">{pt.originality.variationTitle}</p>
+          <p className="mt-1 text-xs text-violet-200/70">{pt.originality.variationHint}</p>
+        </Card>
       )}
 
       <Card className="mb-6">

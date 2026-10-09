@@ -92,7 +92,10 @@ export default function Create() {
     const aspect = ASPECTS[f.aspect];
     const config: Record<string, unknown> = {
       ai_model: f.aiModel,
-      language: f.language,
+      // Locked server-side too when a channel is selected (N3) — sent here
+      // mainly so the review screen shows the language that will actually
+      // be used, not a stale "sem canal" default.
+      language: selectedProject ? selectedProject.language : f.language,
       structure: f.structure,
       tone: f.tone,
       duration: f.duration,
@@ -357,8 +360,20 @@ export default function Create() {
               <Slider value={f.duration} onChange={(v) => set("duration", v)} min={10} max={90} suffix="s" />
             </Field>
             <Field label={pt.create.language}>
-              <Select value={f.language} onChange={(v) => set("language", v)}
-                options={LANGUAGES.map((l) => ({ value: l, label: l }))} />
+              {selectedProject ? (
+                <>
+                  <div className={`${"rounded-lg border border-white/10 bg-inset px-3 py-2 text-sm text-slate-400"}`}>
+                    {selectedProject.language}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">{pt.create.languageLockedByChannel}</p>
+                </>
+              ) : (
+                <Select
+                  value={f.language}
+                  onChange={(v) => set("language", v)}
+                  options={LANGUAGES.map((l) => ({ value: l, label: l }))}
+                />
+              )}
             </Field>
             <Field label={pt.create.backgroundMedia}>
               <Select

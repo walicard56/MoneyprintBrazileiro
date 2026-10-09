@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { Project, Video } from "@/api/types";
-import { Button, Card, Field, Input, PageHeader, StatusBadge } from "@/components/ui";
+import { Button, Card, Field, Input, PageHeader, StatusBadge, Tag } from "@/components/ui";
 
 export default function Videos() {
   const qc = useQueryClient();
@@ -98,7 +98,11 @@ export default function Videos() {
                 <div className="font-semibold text-slate-100">{v.title || v.topic || v.idea || "Untitled"}</div>
                 <div className="mt-0.5 font-mono text-xs text-slate-500">stage: {v.current_stage} · {v.mode}</div>
               </div>
-              <StatusBadge status={v.status} />
+              <div className="flex items-center gap-2">
+                {v.config?.originality_warning != null && <Tag color="amber">low originality</Tag>}
+                {v.config?.variation_hint != null && <Tag color="violet">low variation</Tag>}
+                <StatusBadge status={v.status} />
+              </div>
             </Card>
           </Link>
         ))}

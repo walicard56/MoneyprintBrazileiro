@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import os
+import shutil
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthDep, get_db
+from app.core.config import settings
 from app.core.enums import RunMode, Stage, Status
 from app.db.models import Job, LogEntry, Project, Publication, Scene, Video
 from app.orchestrator.dispatch import start_pipeline
@@ -29,8 +33,12 @@ from app.schemas.video import (
     StageState,
 )
 from app.services.costs import estimate_remaining_cost
+from app.services.narration import InvalidNarrationAudio, apply_narration
+from app.services.production_defaults import apply_production_defaults
 from app.services.publishing import create_publications
 from app.services.style_guidance import apply_style_defaults
+
+_ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"}
 
 router = APIRouter(tags=["videos"], dependencies=[AuthDep])
 
@@ -55,9 +63,12 @@ def create_video(
         raise HTTPException(status_code=404, detail="Project not found.")
 
     config = dict(payload.config)
+    apply_production_defaults(config, project)  # canal > perfil > globais (Etapa 4, item 4.4)
     config.setdefault("duration", project.default_duration)
     config.setdefault("platform", config.get("platform", "tiktok"))
     _pin_active_style(db, project, config)
+    if project.language:
+        config["language"] = project.language  # idioma do canal trava o idioma do vídeo (N3)
 
     video = Video(
         project_id=project_id,
@@ -116,9 +127,12 @@ def create_videos_batch(
     created: list[Video] = []
     for topic in topics:
         config = dict(payload.config)
+        apply_production_defaults(config, project)
         config.setdefault("duration", project.default_duration)
         config.setdefault("platform", config.get("platform", "tiktok"))
         _pin_active_style(db, project, config)
+        if project.language:
+            config["language"] = project.language
         video = Video(
             project_id=project_id,
             idea=topic,
@@ -247,6 +261,40 @@ def regenerate_script(video_id: str, db: Session = Depends(get_db)) -> Video:
     _reopen_stages_from(video, Stage.SCRIPT)
     db.commit()
     start_pipeline(video.id)
+    db.refresh(video)
+    return video
+
+
+@router.post("/videos/{video_id}/narration", response_model=VideoRead)
+def upload_narration_audio(
+    video_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)
+) -> Video:
+    """entry_mode="narration": attach the user's own recorded narration.
+    Transcribes it (word timestamps), builds the script/scenes from the
+    audio's own timing, and skips straight to CHARACTERS — VOICE is
+    satisfied by the uploaded file itself (Etapa 4)."""
+    video = _get_video(db, video_id)
+    if video.config.get("entry_mode") != "narration":
+        raise HTTPException(status_code=400, detail="This video's entry_mode is not 'narration'.")
+    if video.script is not None:
+        raise HTTPException(status_code=409, detail="Narration audio was already attached.")
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Formato de áudio não suportado: {ext or '(nenhum)'}.")
+
+    run_dir = os.path.join(settings.media_root, "narration", video.id)
+    os.makedirs(run_dir, exist_ok=True)
+    audio_path = os.path.join(run_dir, f"narration{ext}")
+    with open(audio_path, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+
+    try:
+        apply_narration(db, video, audio_path)
+    except InvalidNarrationAudio as exc:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     db.refresh(video)
     return video
 

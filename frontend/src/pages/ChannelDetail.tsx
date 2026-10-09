@@ -8,6 +8,7 @@ import type {
   EditorialDirection,
   LabScene,
   Project,
+  ProductionDefaults,
   ReferenceSource,
   ReferenceVideo,
   StyleProfile,
@@ -22,9 +23,11 @@ import {
   Field,
   Input,
   PageHeader,
+  Select,
   StatusBadge,
   Tag,
   Textarea,
+  Toggle,
 } from "@/components/ui";
 import { Modal, ModalHeader } from "@/components/Modal";
 import { formatAge, formatCompactViews, pt } from "@/i18n/ptBR";
@@ -442,6 +445,74 @@ function LabPanel({ projectId }: { projectId: string }) {
   );
 }
 
+function ProductionDefaultsCard({ projectId }: { projectId: string }) {
+  const qc = useQueryClient();
+  const [saved, setSaved] = useState(false);
+
+  const defaults = useQuery({
+    queryKey: ["production-defaults", projectId],
+    queryFn: () => api.get<ProductionDefaults>(`/projects/${projectId}/production-defaults`),
+  });
+
+  const [form, setForm] = useState<ProductionDefaults>({});
+  const current = { ...defaults.data, ...form };
+
+  const save = useMutation({
+    mutationFn: () => api.patch<ProductionDefaults>(`/projects/${projectId}/production-defaults`, form),
+    onSuccess: (data) => {
+      qc.setQueryData(["production-defaults", projectId], data);
+      setForm({});
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    },
+  });
+
+  function set<K extends keyof ProductionDefaults>(key: K, value: ProductionDefaults[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  return (
+    <Card>
+      <h3 className="text-sm font-semibold text-slate-100">{pt.production.title}</h3>
+      <p className="mt-1 text-xs text-slate-500">{pt.production.hint}</p>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label={pt.production.tone}>
+          <Input value={current.tone ?? ""} onChange={(e) => set("tone", e.target.value)} placeholder="casual, dramático…" />
+        </Field>
+        <Field label={pt.production.voice}>
+          <Input value={current.voice ?? ""} onChange={(e) => set("voice", e.target.value)} placeholder="pt-BR-FranciscaNeural" />
+        </Field>
+        <Field label={pt.production.aspect}>
+          <Select
+            value={current.aspect_ratio ?? "9:16"}
+            onChange={(v) => set("aspect_ratio", v)}
+            options={Object.entries(pt.production.aspectOptions).map(([value, label]) => ({ value, label }))}
+          />
+        </Field>
+        <div className="flex flex-col gap-3 pt-6">
+          <Toggle
+            checked={current.subtitles_enabled ?? true}
+            onChange={(v) => set("subtitles_enabled", v)}
+            label={pt.production.subtitlesEnabled}
+          />
+          <Toggle
+            checked={current.music_enabled ?? true}
+            onChange={(v) => set("music_enabled", v)}
+            label={pt.production.musicEnabled}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <Button onClick={() => save.mutate()} disabled={save.isPending || Object.keys(form).length === 0}>
+          {saved ? pt.production.saved : pt.production.save}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 /* -------------------------------------------------------------------- Estilo */
 
 function StyleItemRow({
@@ -577,6 +648,8 @@ function StyleTab({ projectId, onGoToReferences }: { projectId: string; onGoToRe
 
   return (
     <div className="space-y-4">
+      <ProductionDefaultsCard projectId={projectId} />
+
       {featured && (
         <Card>
           <div className="flex items-center justify-between">

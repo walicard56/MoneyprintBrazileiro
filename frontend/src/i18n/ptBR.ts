@@ -97,6 +97,18 @@ export const pt = {
     noSearchProvider:
       "Cadastre um provedor YouTube Data API v3 em Providers antes de aprender uma referência.",
   },
+  production: {
+    title: "Padrões de produção",
+    hint: "Valem para todo vídeo deste canal, a menos que o vídeo em si defina algo diferente.",
+    tone: "Tom",
+    voice: "Voz",
+    aspect: "Formato",
+    aspectOptions: { "9:16": "9:16 vertical", "16:9": "16:9 horizontal" },
+    subtitlesEnabled: "Legenda ligada por padrão",
+    musicEnabled: "Música ligada por padrão",
+    save: "Salvar padrões",
+    saved: "Salvo ✓",
+  },
   style: {
     learnedTitle: "O que o estúdio aprendeu",
     whyPrefix: "Por quê: ",
@@ -185,6 +197,7 @@ export const pt = {
     },
     duration: "Duração aproximada",
     language: "Língua do vídeo",
+    languageLockedByChannel: "Travada pelo idioma do canal. Escolha \"Sem canal\" para um vídeo avulso.",
     backgroundMedia: "Imagens de fundo",
     backgroundMediaOptions: { video: "Só vídeos", mixed: "Vídeos e imagens" },
     videoImageRatio: "Proporção de vídeo vs. imagem",
@@ -230,6 +243,13 @@ export const pt = {
     measuredIn: (n: number) => `medido em ${n} ${n === 1 ? "vídeo" : "vídeos"}`,
     noChannelGrammar: "Nenhum vídeo medido neste canal ainda.",
     error: "Não foi possível analisar este vídeo.",
+  },
+  originality: {
+    warningTitle: (pct: number) => `Roteiro ${pct}% parecido com uma referência aprendida`,
+    warningHint: "Revise antes de aprovar — o estúdio nunca deveria copiar um vídeo específico.",
+    variationTitle: "Parecido com outro vídeo recente deste canal",
+    variationHint:
+      "Reduz repetição superficial, mas não garante elegibilidade de monetização — isso depende do canal como um todo.",
   },
   scriptReview: {
     title: "Revisão do roteiro",
