@@ -10,6 +10,8 @@ import Agents from "./pages/Agents";
 import Prompts from "./pages/Prompts";
 import Accounts from "./pages/Accounts";
 import Settings from "./pages/Settings";
+import Channels from "./pages/Channels";
+import ChannelDetail from "./pages/ChannelDetail";
 
 export default function App() {
   return (
@@ -17,6 +19,8 @@ export default function App() {
       <Route element={<Layout />}>
         <Route index element={<Dashboard />} />
         <Route path="create" element={<Create />} />
+        <Route path="canais" element={<Channels />} />
+        <Route path="canais/:id" element={<ChannelDetail />} />
         <Route path="projects" element={<Projects />} />
         <Route path="videos" element={<Videos />} />
         <Route path="videos/:id" element={<VideoDetail />} />

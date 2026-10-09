@@ -304,3 +304,105 @@ export interface Account {
   params: Record<string, unknown>;
   enabled: boolean;
 }
+
+/* ------------------------------------------------------- Reference learning */
+
+export type ReferenceKind = "video" | "channel";
+export type ReferenceStatus = "pending" | "fetching" | "analyzing" | "ready" | "failed";
+export type ReferenceVideoRole = "top" | "bottom" | "representative" | "none";
+export type TranscriptStatus = "none" | "manual" | "fetched" | "deleted";
+export type ProfileStatus = "draft" | "active" | "archived";
+export type DirectionStatus = "new" | "used" | "dismissed";
+
+export interface ReferenceSource {
+  id: string;
+  project_id: string | null;
+  url: string;
+  kind: ReferenceKind;
+  platform: string;
+  external_id: string;
+  title: string;
+  owner_title: string;
+  status: ReferenceStatus;
+  stage: string;
+  progress: number;
+  error: string;
+  stats: {
+    n_videos?: number;
+    median_views?: number;
+    subscriber_count?: number;
+    window_start?: string | null;
+    window_end?: string | null;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReferenceVideo {
+  id: string;
+  source_id: string;
+  external_id: string;
+  title: string;
+  published_at: string | null;
+  duration_s: number;
+  views: number;
+  likes: number;
+  comments: number;
+  thumbnail_url: string;
+  outlier_score: number | null;
+  views_per_day: number | null;
+  role: ReferenceVideoRole;
+  analysis: Record<string, unknown>;
+  transcript_status: TranscriptStatus;
+}
+
+export interface StyleProfileItem {
+  value: unknown;
+  why: string;
+  confidence: "low" | "medium" | "high";
+  accepted: boolean;
+}
+
+export interface StyleProfileData {
+  roteiro: Record<string, StyleProfileItem>;
+  titulos: Record<string, StyleProfileItem>;
+  imagens: Record<string, StyleProfileItem>;
+  ritmo: Record<string, StyleProfileItem>;
+  legenda: Record<string, StyleProfileItem>;
+  musica: Record<string, StyleProfileItem>;
+  voz: Record<string, StyleProfileItem>;
+  nao_replicavel: string[];
+  meta: Record<string, unknown>;
+}
+
+export interface StyleProfile {
+  id: string;
+  project_id: string;
+  version: number;
+  status: ProfileStatus;
+  profile: Partial<StyleProfileData>;
+  source_ids: string[];
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EditorialDirectionEvidence {
+  video_external_id: string | null;
+  views: number | null;
+  multiplier: number | null;
+  url: string | null;
+}
+
+export interface EditorialDirection {
+  id: string;
+  project_id: string;
+  source_id: string | null;
+  title: string;
+  why: string;
+  approach: string;
+  evidence: EditorialDirectionEvidence;
+  status: DirectionStatus;
+  created_at: string;
+  updated_at: string;
+}

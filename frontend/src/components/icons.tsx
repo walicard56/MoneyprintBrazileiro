@@ -82,3 +82,15 @@ export const IconCaption = (p: SVGProps<SVGSVGElement>) => (
 export const IconPlay = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}><path d="m6 4 14 8-14 8z" /></svg>
 );
+export const IconChannel = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="2" y="7" width="15" height="10" rx="2" />
+    <path d="m21 9-4 2.5 4 2.5z" />
+  </svg>
+);
+export const IconCompass = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="m14.5 9.5-2 5-5 2 2-5z" />
+  </svg>
+);

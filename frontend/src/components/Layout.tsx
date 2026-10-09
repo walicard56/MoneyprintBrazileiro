@@ -9,7 +9,9 @@ import {
   IconText,
   IconUsers,
   IconSettings,
+  IconChannel,
 } from "./icons";
+import { pt } from "@/i18n/ptBR";
 import { BackendStatus } from "./BackendStatus";
 import type { ComponentType, SVGProps } from "react";
 
@@ -24,6 +26,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", end: true, icon: IconDashboard },
   { to: "/create", label: "Create video", icon: IconSparkles, accent: true },
+  { to: "/canais", label: pt.nav.canais, icon: IconChannel },
   { to: "/projects", label: "Projects", icon: IconProjects },
   { to: "/videos", label: "Videos", icon: IconVideo },
   { to: "/providers", label: "Providers / APIs", icon: IconPlug },
