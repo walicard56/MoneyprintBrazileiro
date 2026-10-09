@@ -107,8 +107,22 @@ PRESETS: list[ProviderPreset] = [
         free_details="Free tier with per-minute/day limits on Flash models.",
         requires_api_key=True,
         default_endpoint="https://generativelanguage.googleapis.com/v1beta/openai",
-        default_model="gemini-2.5-flash",
-        suggested_models=["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"],
+        default_model="gemini-3.8-flash",
+        # Per ai.google.dev/gemini-api/docs/models (confirmed 2026-10-09): current
+        # stable text/chat models, newest first; 2.5-series kept at the end since
+        # Google restricts it to pre-existing users. Only /chat/completions is
+        # covered by the OpenAI-compatible layer — Gemini's TTS/STT/video/music
+        # models are NOT reachable through this "openai" provider at all; they'd
+        # need their own native adapters (not yet implemented in this codebase).
+        suggested_models=[
+            "gemini-3.8-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash",
+        ],
         signup_url="https://aistudio.google.com/apikey",
         docs_url="https://ai.google.dev/gemini-api/docs/openai",
         api_key_label="Gemini API key",
@@ -116,7 +130,8 @@ PRESETS: list[ProviderPreset] = [
             "Open https://aistudio.google.com/apikey and sign in with a Google account.",
             "Click 'Create API key' (no credit card required for the free tier).",
             "Copy the key and paste it here.",
-            "Pick a current model from AI Studio if the default is unavailable.",
+            "Pick a current model from AI Studio if the default is unavailable, or use "
+            "Models -> Refresh models to see everything your key can actually use.",
             "Click Test to confirm.",
         ],
         recommended=True,
@@ -210,7 +225,21 @@ PRESETS: list[ProviderPreset] = [
         requires_api_key=True,
         default_endpoint="https://integrate.api.nvidia.com/v1",
         default_model="meta/llama-3.3-70b-instruct",
-        suggested_models=["meta/llama-3.3-70b-instruct", "deepseek-ai/deepseek-r1"],
+        # Per docs.api.nvidia.com/nim (confirmed 2026-10-09): one flagship id per
+        # major hosted family, `publisher/model` format. NIM's catalog is large
+        # and changes often — use Models -> Refresh models for the full live list.
+        suggested_models=[
+            "meta/llama-3.3-70b-instruct",
+            "meta/llama-3.1-8b-instruct",
+            "deepseek-ai/deepseek-v4-pro",
+            "qwen/qwen3-next-80b-a3b-instruct",
+            "nvidia/nemotron-3-super-120b-a12b",
+            "mistralai/mistral-nemotron",
+            "moonshotai/kimi-k2-instruct",
+            "openai/gpt-oss-120b",
+            "microsoft/phi-4-mini-instruct",
+            "google/gemma-7b",
+        ],
         signup_url="https://build.nvidia.com/",
         docs_url="https://docs.api.nvidia.com/",
         api_key_label="NVIDIA API key",
