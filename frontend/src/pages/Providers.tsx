@@ -34,6 +34,8 @@ const CAPS: { key: Capability; label: string }[] = [
   { key: "stt", label: "Subtitles (STT)" },
   { key: "publish", label: "Publishing" },
   { key: "video", label: "Video" },
+  { key: "search", label: "Search" },
+  { key: "music", label: "Music" },
 ];
 
 export default function Providers() {

@@ -244,7 +244,7 @@ def regenerate_script(video_id: str, db: Session = Depends(get_db)) -> Video:
         raise HTTPException(
             status_code=409, detail="This video's script was provided by the user and is locked."
         )
-    _reopen_stages(video, [Stage.SCRIPT, Stage.REVIEW])
+    _reopen_stages_from(video, Stage.SCRIPT)
     db.commit()
     start_pipeline(video.id)
     db.refresh(video)
@@ -271,16 +271,28 @@ def update_video_request(
         config["duration"] = payload.duration
     video.config = config
 
-    _reopen_stages(video, [Stage.RESEARCH, Stage.SCRIPT, Stage.REVIEW])
+    _reopen_stages_from(video, Stage.RESEARCH)
     db.commit()
     start_pipeline(video.id)
     db.refresh(video)
     return video
 
 
-def _reopen_stages(video: Video, stages: list[Stage]) -> None:
+def _reopen_stages_from(video: Video, start: Stage) -> None:
+    """Reopen ``start`` and every stage after it in pipeline order.
+
+    A rewritten script invalidates everything built from it — storyboard,
+    scenes, images, voice, render — not just SCRIPT/REVIEW themselves. On a
+    video that had already finished once, leaving those downstream stages
+    marked "completed" meant next_stage() considered the video done again
+    right after the new script was reviewed, silently keeping the old
+    scenes/images/voice/render paired with the brand-new script.
+    """
+    from app.agents.registry import PIPELINE_STAGES
+
     status_map = dict(video.stage_status or {})
-    for stage in stages:
+    start_index = PIPELINE_STAGES.index(start)
+    for stage in PIPELINE_STAGES[start_index:]:
         status_map.pop(stage.value, None)
     video.stage_status = status_map
     video.status = Status.PENDING

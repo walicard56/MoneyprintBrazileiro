@@ -5,6 +5,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agents.registry import PIPELINE_STAGES
+from app.core.enums import Status
+from app.db.session import SessionLocal
+
 API = "/api/v1"
 
 
@@ -39,6 +43,67 @@ def test_regenerate_script_reopens_script_and_review_stages(client: TestClient) 
     stages = {s["stage"]: s["status"] for s in progress["stages"]}
     assert stages["script"] == "pending"
     assert stages["review"] == "pending"
+
+
+def test_regenerate_script_reopens_every_downstream_stage_too(client: TestClient) -> None:
+    """Regression: a video that already finished its whole pipeline once
+    must have STORYBOARD onward reopened too — otherwise next_stage() finds
+    nothing left to do right after REVIEW and silently keeps the old
+    scenes/images/voice/render paired with the freshly rewritten script."""
+    project_id = _make_project(client)
+    created = client.post(
+        f"{API}/projects/{project_id}/videos", json={"idea": "x", "autostart": False}
+    )
+    video_id = created.json()["id"]
+
+    db = SessionLocal()
+    try:
+        from app.db.models import Video
+
+        video = db.get(Video, video_id)
+        video.status = Status.COMPLETED
+        video.stage_status = {s.value: Status.COMPLETED.value for s in PIPELINE_STAGES}
+        db.commit()
+    finally:
+        db.close()
+
+    resp = client.post(f"{API}/videos/{video_id}/regenerate-script")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "pending"
+
+    progress = client.get(f"{API}/videos/{video_id}/progress").json()
+    stages = {s["stage"]: s["status"] for s in progress["stages"]}
+    for stage in PIPELINE_STAGES:
+        if stage.value == "research":
+            continue  # unaffected: regenerate keeps the existing research notes
+        assert stages[stage.value] == "pending", f"{stage.value} should have been reopened"
+
+
+def test_update_request_reopens_every_downstream_stage_too(client: TestClient) -> None:
+    project_id = _make_project(client)
+    created = client.post(
+        f"{API}/projects/{project_id}/videos", json={"idea": "x", "autostart": False}
+    )
+    video_id = created.json()["id"]
+
+    db = SessionLocal()
+    try:
+        from app.db.models import Video
+
+        video = db.get(Video, video_id)
+        video.status = Status.COMPLETED
+        video.stage_status = {s.value: Status.COMPLETED.value for s in PIPELINE_STAGES}
+        db.commit()
+    finally:
+        db.close()
+
+    resp = client.patch(f"{API}/videos/{video_id}/request", json={"topic": "new topic"})
+    assert resp.status_code == 200
+
+    progress = client.get(f"{API}/videos/{video_id}/progress").json()
+    stages = {s["stage"]: s["status"] for s in progress["stages"]}
+    for stage in PIPELINE_STAGES:
+        assert stages[stage.value] == "pending", f"{stage.value} should have been reopened"
 
 
 def test_regenerate_script_rejected_when_script_locked(client: TestClient) -> None:
