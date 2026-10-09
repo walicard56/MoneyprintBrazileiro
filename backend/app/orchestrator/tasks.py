@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from app.core.enums import Status
 from app.core.logging import get_logger
-from app.db.models import Video
+from app.db.models import ReferenceSource, Video
 from app.db.session import SessionLocal
 from app.orchestrator.engine import step
+from app.services.reference_ingest import ingest_reference
 from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
@@ -40,5 +41,18 @@ def run_next_stage(self, video_id: str) -> str:  # noqa: ANN001
         ):
             run_next_stage.delay(video_id)
         return video.status.value
+    finally:
+        db.close()
+
+
+@celery_app.task(name="reference.ingest", bind=True, max_retries=0)
+def run_reference_ingest(self, source_id: str) -> str:  # noqa: ANN001
+    """Run reference ingestion to completion. Unlike ``run_next_stage``, this
+    isn't paused for approval partway through, so one task call suffices."""
+    db = SessionLocal()
+    try:
+        ingest_reference(db, source_id)
+        source = db.get(ReferenceSource, source_id)
+        return source.status.value if source is not None else "not_found"
     finally:
         db.close()

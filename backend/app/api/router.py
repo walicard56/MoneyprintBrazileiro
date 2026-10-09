@@ -13,6 +13,7 @@ from app.api.routers import (
     projects,
     prompts,
     providers,
+    references,
     templates,
     videos,
 )
@@ -27,4 +28,5 @@ api_router.include_router(accounts.router)
 api_router.include_router(agents.router)
 api_router.include_router(prompts.router)
 api_router.include_router(templates.router)
+api_router.include_router(references.router)
 api_router.include_router(admin.router)
