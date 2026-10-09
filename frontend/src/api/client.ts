@@ -80,6 +80,16 @@ async function postBlob(path: string, body: unknown): Promise<Blob> {
   return res.blob();
 }
 
+// GET that expects a binary response (scene thumbnails, the rendered video)
+// — there's no static file mount, so these go through an authenticated API
+// route and the frontend fetches them as blobs instead of a plain <img
+// src>/<a href>, which can't carry the bearer header.
+async function getBlob(path: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
@@ -87,4 +97,5 @@ export const api = {
   del: (path: string) => request<void>("DELETE", path),
   postForm,
   postBlob,
+  getBlob,
 };

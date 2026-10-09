@@ -5,6 +5,7 @@ import Create from "./pages/Create";
 import Projects from "./pages/Projects";
 import Videos from "./pages/Videos";
 import VideoDetail from "./pages/VideoDetail";
+import VideoEditor from "./pages/VideoEditor";
 import Providers from "./pages/Providers";
 import Agents from "./pages/Agents";
 import Prompts from "./pages/Prompts";
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="projects" element={<Projects />} />
         <Route path="videos" element={<Videos />} />
         <Route path="videos/:id" element={<VideoDetail />} />
+        <Route path="videos/:id/editor" element={<VideoEditor />} />
         <Route path="providers" element={<Providers />} />
         <Route path="agents" element={<Agents />} />
         <Route path="prompts" element={<Prompts />} />

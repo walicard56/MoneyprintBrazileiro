@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { LogEntry, VideoDetail as VideoDetailT, VideoProgress } from "@/api/types";
@@ -94,6 +94,11 @@ export default function VideoDetail() {
             <StatusBadge status={v.status} />
             {["failed", "cancelled", "pending"].includes(v.status) && (
               <Button variant="ghost" onClick={() => run.mutate()}>Run</Button>
+            )}
+            {v.scenes.length > 0 && (
+              <Link to={`/videos/${v.id}/editor`}>
+                <Button variant="ghost">{pt.editor.title}</Button>
+              </Link>
             )}
           </div>
         }

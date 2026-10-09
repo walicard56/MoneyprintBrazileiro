@@ -50,6 +50,28 @@ class VideoRequestUpdate(BaseModel):
     duration: int | None = None
 
 
+class SceneSplitRequest(BaseModel):
+    # How far through the scene's narration (by word count) to cut, 0-1.
+    at_ratio: float = 0.5
+
+
+class RevoiceRequest(BaseModel):
+    voice: str | None = None
+
+
+class CaptionStyleUpdate(BaseModel):
+    enabled: bool | None = None
+    fontsize: int | None = None
+    color: str | None = None
+    position: str | None = None
+
+
+class SceneImageFromUrlRequest(BaseModel):
+    url: str
+    provider: str = ""
+    media_id: str = ""
+
+
 class SceneRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

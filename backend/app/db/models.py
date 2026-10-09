@@ -818,3 +818,20 @@ class MediaUsage(UUIDMixin, TimestampMixin, Base):
     )
     provider: Mapped[str] = mapped_column(String(100))
     media_id: Mapped[str] = mapped_column(String(200))
+
+
+class EditOperation(UUIDMixin, TimestampMixin, Base):
+    """One undo/redo step in the in-app editor (Etapa 7) — ``before``/
+    ``after`` are each a full snapshot of the video's scene list, so
+    undo/redo just means "replace the scenes with this snapshot" instead
+    of special-casing every op kind (split/merge/field edit)."""
+
+    __tablename__ = "edit_operations"
+
+    video_id: Mapped[str] = mapped_column(
+        ForeignKey("videos.id", ondelete="CASCADE"), index=True
+    )
+    seq: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(50))
+    before: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    after: Mapped[list[Any]] = mapped_column(JSON, default=list)

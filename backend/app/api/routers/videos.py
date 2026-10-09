@@ -4,26 +4,35 @@ from __future__ import annotations
 
 import os
 import shutil
+import uuid
 
+import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthDep, get_db
 from app.core.config import settings
-from app.core.enums import RunMode, Stage, Status
+from app.core.enums import Capability, RunMode, Stage, Status
 from app.db.models import Job, LogEntry, Project, Publication, Scene, Video
 from app.orchestrator.dispatch import start_pipeline
 from app.orchestrator.engine import apply_entry_mode, approve_and_continue
+from app.providers.base import ImageRequest
+from app.providers.router import NoProviderAvailable, ProviderRouter
 from app.schemas.account import PublicationRead
 from app.schemas.video import (
     ApproveRequest,
     BatchCreate,
+    CaptionStyleUpdate,
     CostEstimate,
     JobRead,
     LogRead,
     PublishRequest,
+    RevoiceRequest,
+    SceneImageFromUrlRequest,
     SceneRead,
+    SceneSplitRequest,
     SceneUpdate,
     VideoCreate,
     VideoDetail,
@@ -32,14 +41,17 @@ from app.schemas.video import (
     VideoRequestUpdate,
     StageState,
 )
+from app.services import editing
 from app.services.costs import estimate_remaining_cost
 from app.services.duration import parse_duration
+from app.services.media_dedup import record_media_usage
 from app.services.narration import InvalidNarrationAudio, apply_narration
 from app.services.production_defaults import apply_production_defaults
 from app.services.publishing import create_publications
 from app.services.style_guidance import apply_style_defaults
 
 _ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"}
+_ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 router = APIRouter(tags=["videos"], dependencies=[AuthDep])
 
@@ -49,6 +61,32 @@ def _get_video(db: Session, video_id: str) -> Video:
     if video is None:
         raise HTTPException(status_code=404, detail="Video not found.")
     return video
+
+
+def _get_scene(db: Session, scene_id: str) -> Scene:
+    scene = db.get(Scene, scene_id)
+    if scene is None:
+        raise HTTPException(status_code=404, detail="Scene not found.")
+    return scene
+
+
+def _serve_local_file(path: str) -> FileResponse:
+    """Etapa 7: there's no static file mount — every media file the editor
+    needs (scene thumbnails, the rendered video) goes through an
+    authenticated endpoint like this one instead, and the frontend fetches
+    it with its own auth header rather than a plain ``<img src>``/``<a
+    href>`` navigation."""
+    if not path:
+        raise HTTPException(status_code=404, detail="File not found.")
+    real_media_root = os.path.realpath(settings.media_root)
+    real_path = os.path.realpath(path)
+    try:
+        within_root = os.path.commonpath([real_media_root, real_path]) == real_media_root
+    except ValueError:  # different drives on Windows
+        within_root = False
+    if not within_root or not os.path.isfile(real_path):
+        raise HTTPException(status_code=404, detail="File not found.")
+    return FileResponse(real_path)
 
 
 @router.post(
@@ -383,11 +421,233 @@ def list_scenes(video_id: str, db: Session = Depends(get_db)) -> list[Scene]:
 def update_scene(
     scene_id: str, payload: SceneUpdate, db: Session = Depends(get_db)
 ) -> Scene:
-    scene = db.get(Scene, scene_id)
-    if scene is None:
-        raise HTTPException(status_code=404, detail="Scene not found.")
+    scene = _get_scene(db, scene_id)
+    video = _get_video(db, scene.video_id)
+    before = editing.snapshot_scenes(db, video)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(scene, key, value)
+    db.flush()
+    after = editing.snapshot_scenes(db, video)
+    editing.record_edit(db, video, "update_scene", before, after)
+    db.commit()
+    db.refresh(scene)
+    return scene
+
+
+@router.post("/scenes/{scene_id}/split", response_model=VideoDetail)
+def split_scene(scene_id: str, payload: SceneSplitRequest, db: Session = Depends(get_db)) -> Video:
+    scene = _get_scene(db, scene_id)
+    video = _get_video(db, scene.video_id)
+    before = editing.snapshot_scenes(db, video)
+    try:
+        editing.split_scene(db, video, scene, at_ratio=payload.at_ratio)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    after = editing.snapshot_scenes(db, video)
+    editing.record_edit(db, video, "split", before, after)
+    _reopen_stages_from(video, Stage.EDIT)
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+@router.post("/scenes/{scene_id}/merge-next", response_model=VideoDetail)
+def merge_scene_with_next(scene_id: str, db: Session = Depends(get_db)) -> Video:
+    scene = _get_scene(db, scene_id)
+    video = _get_video(db, scene.video_id)
+    next_scene = db.execute(
+        select(Scene).where(Scene.video_id == video.id, Scene.index == scene.index + 1)
+    ).scalar_one_or_none()
+    if next_scene is None:
+        raise HTTPException(status_code=400, detail="This is the last scene; nothing to merge with.")
+    before = editing.snapshot_scenes(db, video)
+    editing.merge_scenes(db, video, scene, next_scene)
+    after = editing.snapshot_scenes(db, video)
+    editing.record_edit(db, video, "merge", before, after)
+    _reopen_stages_from(video, Stage.EDIT)
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+@router.post("/videos/{video_id}/undo", response_model=VideoDetail)
+def undo_edit(video_id: str, db: Session = Depends(get_db)) -> Video:
+    video = _get_video(db, video_id)
+    if not editing.undo(db, video):
+        raise HTTPException(status_code=409, detail="Nothing to undo.")
+    _reopen_stages_from(video, Stage.EDIT)
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+@router.post("/videos/{video_id}/redo", response_model=VideoDetail)
+def redo_edit(video_id: str, db: Session = Depends(get_db)) -> Video:
+    video = _get_video(db, video_id)
+    if not editing.redo(db, video):
+        raise HTTPException(status_code=409, detail="Nothing to redo.")
+    _reopen_stages_from(video, Stage.EDIT)
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+@router.patch("/videos/{video_id}/caption-style", response_model=VideoRead)
+def update_caption_style(
+    video_id: str, payload: CaptionStyleUpdate, db: Session = Depends(get_db)
+) -> Video:
+    video = _get_video(db, video_id)
+    cfg = dict(video.config)
+    if payload.enabled is not None:
+        cfg["subtitles_enabled"] = payload.enabled
+    if payload.fontsize is not None:
+        cfg["subtitle_fontsize"] = payload.fontsize
+    if payload.color is not None:
+        cfg["subtitle_color"] = payload.color
+    if payload.position is not None:
+        cfg["subtitle_position"] = payload.position
+    video.config = cfg
+    _reopen_stages_from(video, Stage.EDIT)
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+@router.post("/videos/{video_id}/revoice", response_model=VideoRead)
+def revoice_video(video_id: str, payload: RevoiceRequest, db: Session = Depends(get_db)) -> Video:
+    """Regenerates the voiceover (and everything timed off it — subtitles,
+    timeline, render) — e.g. after picking a different voice."""
+    video = _get_video(db, video_id)
+    if video.script is None:
+        raise HTTPException(status_code=409, detail="This video has no script yet.")
+    if payload.voice is not None:
+        cfg = dict(video.config)
+        cfg["voice"] = payload.voice
+        video.config = cfg
+    _reopen_stages_from(video, Stage.VOICE)
+    db.commit()
+    start_pipeline(video.id)
+    db.refresh(video)
+    return video
+
+
+@router.post("/videos/{video_id}/export", response_model=VideoRead)
+def export_video(video_id: str, db: Session = Depends(get_db)) -> Video:
+    """Re-renders the final MP4 from the current scenes/captions —
+    the editor's "Exportar" button."""
+    video = _get_video(db, video_id)
+    if not video.scenes:
+        raise HTTPException(status_code=409, detail="This video has no scenes yet.")
+    _reopen_stages_from(video, Stage.EDIT)
+    db.commit()
+    start_pipeline(video.id)
+    db.refresh(video)
+    return video
+
+
+@router.get("/videos/{video_id}/download")
+def download_video(video_id: str, db: Session = Depends(get_db)) -> FileResponse:
+    video = _get_video(db, video_id)
+    if not video.video_path:
+        raise HTTPException(status_code=409, detail="This video hasn't been rendered yet.")
+    return _serve_local_file(video.video_path)
+
+
+@router.get("/scenes/{scene_id}/thumbnail")
+def scene_thumbnail(scene_id: str, db: Session = Depends(get_db)) -> FileResponse:
+    scene = _get_scene(db, scene_id)
+    return _serve_local_file(scene.image_path)
+
+
+@router.post("/scenes/{scene_id}/image/regenerate", response_model=SceneRead)
+def regenerate_scene_image(scene_id: str, db: Session = Depends(get_db)) -> Scene:
+    scene = _get_scene(db, scene_id)
+    video = _get_video(db, scene.video_id)
+    prompt = scene.visual_prompt or scene.visual_description or scene.narration
+    if not prompt:
+        raise HTTPException(status_code=409, detail="This scene has no prompt to generate an image from.")
+    aspect = video.config.get("aspect_ratio", "9:16")
+    out_path = os.path.join(settings.media_root, f"{uuid.uuid4()}.png")
+
+    def fn(provider, _p=prompt, _out=out_path):
+        resp = provider.generate(ImageRequest(prompt=_p, aspect_ratio=aspect, output_path=_out))
+        return resp, resp.usage
+
+    try:
+        result = ProviderRouter(db).run(Capability.IMAGE, fn, project_id=video.project_id, video_id=video.id)
+    except NoProviderAvailable as exc:
+        raise HTTPException(status_code=409, detail=f"Image generation unavailable: {exc}") from exc
+
+    before = editing.snapshot_scenes(db, video)
+    scene.image_path = result.value.path
+    db.flush()
+    after = editing.snapshot_scenes(db, video)
+    editing.record_edit(db, video, "replace_image", before, after)
+    _reopen_stages_from(video, Stage.EDIT)
+    db.commit()
+    db.refresh(scene)
+    return scene
+
+
+@router.post("/scenes/{scene_id}/image/from-url", response_model=SceneRead)
+def set_scene_image_from_url(
+    scene_id: str, payload: SceneImageFromUrlRequest, db: Session = Depends(get_db)
+) -> Scene:
+    """"Buscar na internet": the frontend already searched ``/media/search``
+    and is handing back the chosen item's ``download_url``."""
+    scene = _get_scene(db, scene_id)
+    video = _get_video(db, scene.video_id)
+    try:
+        with httpx.Client(timeout=30, follow_redirects=True) as client:
+            resp = client.get(payload.url)
+            resp.raise_for_status()
+            image_bytes = resp.content
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not download image: {exc}") from exc
+
+    ext = os.path.splitext(payload.url.split("?")[0])[1].lower()
+    if ext not in _ALLOWED_IMAGE_EXTENSIONS:
+        ext = ".jpg"
+    out_path = os.path.join(settings.media_root, f"{uuid.uuid4()}{ext}")
+    with open(out_path, "wb") as fh:
+        fh.write(image_bytes)
+
+    before = editing.snapshot_scenes(db, video)
+    scene.image_path = out_path
+    db.flush()
+    after = editing.snapshot_scenes(db, video)
+    editing.record_edit(db, video, "replace_image", before, after)
+    _reopen_stages_from(video, Stage.EDIT)
+    if payload.provider and payload.media_id:
+        record_media_usage(
+            db, video_id=video.id, project_id=video.project_id,
+            provider=payload.provider, media_id=payload.media_id,
+        )
+    db.commit()
+    db.refresh(scene)
+    return scene
+
+
+@router.post("/scenes/{scene_id}/image/upload", response_model=SceneRead)
+def upload_scene_image(
+    scene_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)
+) -> Scene:
+    scene = _get_scene(db, scene_id)
+    video = _get_video(db, scene.video_id)
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Formato de imagem não suportado: {ext or '(nenhum)'}.")
+
+    out_path = os.path.join(settings.media_root, f"{uuid.uuid4()}{ext}")
+    with open(out_path, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+
+    before = editing.snapshot_scenes(db, video)
+    scene.image_path = out_path
+    db.flush()
+    after = editing.snapshot_scenes(db, video)
+    editing.record_edit(db, video, "replace_image", before, after)
+    _reopen_stages_from(video, Stage.EDIT)
     db.commit()
     db.refresh(scene)
     return scene
