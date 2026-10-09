@@ -4,6 +4,7 @@ providers) — no real network, no real YouTube API calls."""
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -11,20 +12,32 @@ from sqlalchemy.orm import Session
 
 from app.core.enums import (
     Capability,
+    ProfileStatus,
     ReferenceKind,
     ReferenceStatus,
     ReferenceVideoRole,
 )
 from app.core.security import get_cipher
-from app.db.models import Project, ProviderConfig, ReferenceSource, ReferenceVideo
+from app.db.models import (
+    EditorialDirection,
+    Project,
+    ProviderConfig,
+    ReferenceSource,
+    ReferenceVideo,
+    StyleProfile,
+)
 from app.db.session import SessionLocal
 from app.providers.base import (
     ChannelInfo,
+    LLMProvider,
+    LLMRequest,
+    LLMResponse,
     ProviderError,
     ResolvedRef,
     SearchProvider,
     SearchRequest,
     SearchResponse,
+    Usage,
     VideoInfo,
 )
 from app.providers.registry import register
@@ -248,3 +261,168 @@ def test_invalid_url_marks_source_failed(db: Session, _script: _Script) -> None:
 
 def test_missing_source_is_a_noop(db: Session) -> None:
     ingest_reference(db, "nonexistent-id")  # must not raise
+
+
+_LLM_SCRIPT: dict[str, str] = {}
+
+
+@register(display_name="Mock Ingest LLM", requires_api_key=False)
+class MockIngestLLM(LLMProvider):
+    provider_key = "mock_ingest_llm"
+
+    def generate(self, request: LLMRequest) -> LLMResponse:
+        p = request.prompt
+        if "Analyze the SHAPE of this video" in p:
+            text = _LLM_SCRIPT["fiche"]
+        elif "channel-level style profile" in p:
+            text = _LLM_SCRIPT["profile"]
+        elif "Generate original editorial directions" in p:
+            text = _LLM_SCRIPT["directions"]
+        else:
+            text = "{}"
+        return LLMResponse(text=text, usage=Usage())
+
+
+def _add_llm_provider(db: Session) -> None:
+    db.add(
+        ProviderConfig(
+            name="mock-ingest-llm",
+            capability=Capability.LLM,
+            provider="mock_ingest_llm",
+            api_key_encrypted=get_cipher().encrypt(""),
+            enabled=True,
+            is_fallback=True,
+        )
+    )
+    db.commit()
+
+
+def test_full_ingestion_with_llm_produces_draft_profile_and_directions(
+    db: Session, _script: _Script
+) -> None:
+    """Phase 4 acceptance criterion: after ingesting a fake channel with a
+    fake LLM, a draft profile with accepted items and directions carrying
+    evidence.multiplier exist, and activating the profile updates
+    Project.config."""
+    _add_search_provider(db)
+    _add_llm_provider(db)
+    project = Project(name="Channel Project", niche="science", language="English")
+    db.add(project)
+    db.commit()
+    source = _make_source(
+        db, "https://www.youtube.com/channel/UCtest1234567890", project_id=project.id
+    )
+    source.kind = ReferenceKind.CHANNEL
+    db.commit()
+
+    views = [1000] * 8 + [10000, 10]
+    videos_info = [_video_info(f"v{i}", v) for i, v in enumerate(views)]
+    _script.set("resolve", ResolvedRef(kind="channel", external_id="UCtest1234567890"))
+    _script.set(
+        "channel",
+        ChannelInfo(
+            external_id="UCtest1234567890",
+            title="Test Channel",
+            uploads_playlist_id="UUtest1234567890",
+            subscriber_count=5000,
+        ),
+    )
+    _script.set("channel_videos", videos_info)
+
+    _LLM_SCRIPT["fiche"] = json.dumps(
+        {
+            "estrutura": "setup then payoff",
+            "gancho": "a direct question",
+            "viradas": [],
+            "linguagem": "casual",
+            "ritmo": "fast",
+            "confidence": "medium",
+            "tinha_transcricao": False,
+        }
+    )
+    _LLM_SCRIPT["profile"] = json.dumps(
+        {
+            "roteiro": {
+                "narrador": {
+                    "value": "first person",
+                    "why": "consistent across top videos",
+                    "confidence": "medium",
+                    "accepted": True,
+                }
+            },
+            "titulos": {},
+            "imagens": {},
+            "ritmo": {},
+            "legenda": {},
+            "musica": {},
+            "voz": {},
+            "nao_replicavel": ["apresentador na câmera"],
+            "meta": {},
+        }
+    )
+    _LLM_SCRIPT["directions"] = json.dumps(
+        [
+            {
+                "title": "Why most people get this backwards",
+                "why": "performed 10x the channel median",
+                "approach": "open with the counterintuitive claim",
+                "evidence": {
+                    "video_external_id": "v8",
+                    "views": 10000,
+                    "multiplier": 10.0,
+                    "url": "https://www.youtube.com/watch?v=v8",
+                },
+            }
+        ]
+    )
+
+    ingest_reference(db, source.id)
+
+    db.refresh(source)
+    assert source.status == ReferenceStatus.READY, source.error
+
+    profile = (
+        db.query(StyleProfile)
+        .filter_by(project_id=project.id, status=ProfileStatus.DRAFT)
+        .one()
+    )
+    assert profile.version == 1
+    assert profile.profile["roteiro"]["narrador"]["accepted"] is True
+    assert profile.profile["nao_replicavel"] == ["apresentador na câmera"]
+
+    directions = db.query(EditorialDirection).filter_by(project_id=project.id).all()
+    assert len(directions) == 1
+    assert directions[0].evidence["multiplier"] == pytest.approx(10.0)
+    assert directions[0].title != "v8"  # never the raw source video id/title
+
+    analyzed = [v for v in source.videos if v.analysis]
+    assert len(analyzed) >= 1
+    assert all(v.transcript_status.value == "none" for v in source.videos)
+
+    # Activating the draft profile updates Project.config (D2).
+    from app.api.routers.styles import activate_style_profile
+
+    activate_style_profile(profile.id, db=db)
+    db.refresh(project)
+    assert project.config["active_style_profile_id"] == profile.id
+
+
+def test_ingestion_without_llm_reaches_ready_with_no_profile(
+    db: Session, _script: _Script
+) -> None:
+    """D7/Phase 4: without an LLM provider, ingestion still reaches "ready" —
+    it just skips fiches/profile/directions, and says so."""
+    _add_search_provider(db)
+    project = Project(name="P", niche="science", language="English")
+    db.add(project)
+    db.commit()
+    source = _make_source(db, "https://www.youtube.com/watch?v=abc12345678", project_id=project.id)
+
+    _script.set("resolve", ResolvedRef(kind="video", external_id="abc12345678"))
+    _script.set("video", _video_info("abc12345678", 500))
+
+    ingest_reference(db, source.id)
+
+    db.refresh(source)
+    assert source.status == ReferenceStatus.READY
+    assert db.query(StyleProfile).filter_by(project_id=project.id).count() == 0

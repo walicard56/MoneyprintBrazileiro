@@ -66,6 +66,40 @@ class ReferenceSourceDetail(ReferenceSourceRead):
     videos: list[ReferenceVideoRead] = Field(default_factory=list)
 
 
+# --- Agent output shapes (Phase 4) ---
+
+
+class ReferenceVideoAnalysis(BaseModel):
+    """The abstract per-video fiche produced by ``ReferenceAnalystAgent``,
+    stored in ``ReferenceVideo.analysis``. Never contains verbatim text from
+    the source video — see the anti-copy rule in its prompt."""
+
+    estrutura: str = ""
+    gancho: str = ""
+    viradas: list[str] = Field(default_factory=list)
+    linguagem: str = ""
+    ritmo: str = ""
+    confidence: str = "low"  # low | medium | high
+    tinha_transcricao: bool = False
+
+
+class EditorialDirectionEvidence(BaseModel):
+    video_external_id: str | None = None
+    views: int | None = None
+    multiplier: float | None = None
+    url: str | None = None
+
+
+class EditorialDirectionItem(BaseModel):
+    """One direction as produced by ``TrendAgent`` — an original subject and
+    angle, never a rewrite of a source video (D6 anti-copy rule)."""
+
+    title: str
+    why: str = ""
+    approach: str = ""
+    evidence: EditorialDirectionEvidence = Field(default_factory=EditorialDirectionEvidence)
+
+
 # --- Style profile item/section shape (schema used inside StyleProfile.profile) ---
 
 
@@ -124,3 +158,7 @@ class EditorialDirectionRead(BaseModel):
     status: DirectionStatus
     created_at: datetime
     updated_at: datetime
+
+
+class DirectionsDiscoverRequest(BaseModel):
+    niche: str = Field(min_length=1, max_length=200)

@@ -20,6 +20,9 @@ DEFAULT_AGENT_SETTINGS: dict[AgentType, dict] = {
     AgentType.SCENE_DIRECTOR: {"temperature": 0.7, "max_tokens": 3000},
     AgentType.CHARACTER_DESIGNER: {"temperature": 0.8, "max_tokens": 2000},
     AgentType.QC: {"temperature": 0.2, "max_tokens": 1200},
+    AgentType.REFERENCE_ANALYST: {"temperature": 0.3, "max_tokens": 1200},
+    AgentType.STYLE_PROFILER: {"temperature": 0.4, "max_tokens": 2500},
+    AgentType.TREND: {"temperature": 0.8, "max_tokens": 1500},
 }
 
 _SCRIPT_PROMPT = """You are writing the narration script for a short vertical video.
@@ -129,6 +132,94 @@ Language: {language}
 
 Return 5-8 short factual bullet points in {language}, one per line, no numbering."""
 
+_REFERENCE_ANALYST_PROMPT = """You are analyzing one reference video to learn its abstract
+style for a different channel — never to copy or quote it.
+
+CRITICAL RULE: {anti_copy_rule}
+
+Video title: {title}
+Duration: {duration_s} seconds
+Views: {views} (likes: {likes}, comments: {comments})
+Outlier score vs. this channel's median views: {outlier_score}
+Published: {published_at}
+Transcript (may say "(not available)"): {transcript}
+
+Analyze the SHAPE of this video, not its content: how the narration is
+structured, what kind of hook opens it, where it pivots, its language
+register, and its pacing. If no transcript was provided, infer only what the
+metadata and duration can reasonably support, and reflect that honestly in
+"confidence" and "tinha_transcricao".
+
+Return ONLY a JSON object, with every text value written in {language}:
+{{"estrutura": "...", "gancho": "...", "viradas": ["...", "..."],
+"linguagem": "...", "ritmo": "...", "confidence": "low"|"medium"|"high",
+"tinha_transcricao": true|false}}"""
+
+_STYLE_PROFILER_PROMPT = """You aggregate several per-video analyses into one
+channel-level style profile — an abstract pattern, never a copy of any one video.
+
+CRITICAL RULE: {anti_copy_rule}
+
+Channel niche: {niche}
+Target language for every text value below: {language}
+Number of videos analyzed: {videos_analyzed}
+Had at least one transcript available: {had_transcript}
+
+Per-video fiches as JSON, each tagged with its role (top = big outlier / what
+blew up, bottom = underperformed, representative = typical for the channel):
+{fiches_json}
+
+Where you can, contrast what the "top" videos do differently from the
+"bottom" ones. For "nao_replicavel", pick and translate into {language} only
+the limitations below that genuinely seem to apply here — don't invent
+others: on-camera presenter, custom/hand-drawn animation, animated maps,
+animated on-screen text effects, cross-dissolve transitions between clips.
+
+Return ONLY a JSON object matching this exact shape. Every leaf item has
+"value", "why" (short, with a number when you have one), "confidence"
+("low"|"medium"|"high"), and "accepted" (always true):
+{{
+  "roteiro": {{"narrador": {{}}, "tom": {{}}, "como_o_video_avanca": {{}},
+    "como_o_video_termina": {{}}, "linguagem": {{}}, "gancho_inicial": {{}},
+    "pergunta_que_prende": {{}}}},
+  "titulos": {{"padroes": {{"value": ["..."], "why": "...", "confidence": "...", "accepted": true}}}},
+  "imagens": {{"tipo": {{}}, "percentual_video": {{}}, "fontes_sugeridas": {{}}}},
+  "ritmo": {{"corte_mediano_s": {{}}, "palavras_por_minuto": {{}}}},
+  "legenda": {{"estilo": {{}}, "cor": {{}}, "destaque": {{}}, "caixa_alta": {{}}}},
+  "musica": {{"genero": {{}}, "nivel_relativo_db": {{}}}},
+  "voz": {{"genero": {{}}, "timbre": {{}}, "velocidade": {{}}, "idioma": {{}},
+    "sugestao_de_voz": {{}}}},
+  "nao_replicavel": ["..."],
+  "meta": {{"versao_do_schema": 1, "videos_analisados": {videos_analyzed},
+    "tinha_transcricao": {had_transcript}}}
+}}
+Each "{{}}" above is itself a full item object (value/why/confidence/accepted).
+Fields that depend on media you don't have (corte_mediano_s, nivel_relativo_db)
+must have "value": null, "confidence": "low", and
+"why": "precisa do arquivo de midia"."""
+
+_TREND_PROMPT = """Generate original editorial directions — new subjects and
+angles, never rewrites — for videos in this niche.
+
+CRITICAL RULE: {anti_copy_rule}
+
+Niche: {niche}
+Language for every text value below: {language}
+
+Evidence of what performs well (may be empty — if so, rely on general
+knowledge of this niche instead):
+{opportunities_json}
+
+For each direction, explain the opportunity with a concrete number when you
+have one (e.g. "performed 10.1x this channel's median views").
+
+Return ONLY a JSON array, each item:
+{{"title": "an original video subject + angle, written in {language}",
+"why": "the opportunity, with a number when available, in {language}",
+"approach": "a short, original angle to take, in {language} — never a rewrite of the source",
+"evidence": {{"video_external_id": "..." or null, "views": 0 or null,
+"multiplier": 0.0 or null, "url": "..." or null}}}}"""
+
 DEFAULT_PROMPTS: dict[AgentType, str] = {
     AgentType.RESEARCH: _RESEARCH_PROMPT,
     AgentType.SCRIPT: _SCRIPT_PROMPT,
@@ -137,4 +228,7 @@ DEFAULT_PROMPTS: dict[AgentType, str] = {
     AgentType.SCENE_DIRECTOR: _SCENE_DIRECTOR_PROMPT,
     AgentType.CHARACTER_DESIGNER: _CHARACTER_PROMPT,
     AgentType.QC: _QC_PROMPT,
+    AgentType.REFERENCE_ANALYST: _REFERENCE_ANALYST_PROMPT,
+    AgentType.STYLE_PROFILER: _STYLE_PROFILER_PROMPT,
+    AgentType.TREND: _TREND_PROMPT,
 }

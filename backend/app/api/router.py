@@ -14,6 +14,7 @@ from app.api.routers import (
     prompts,
     providers,
     references,
+    styles,
     templates,
     videos,
 )
@@ -29,4 +30,5 @@ api_router.include_router(agents.router)
 api_router.include_router(prompts.router)
 api_router.include_router(templates.router)
 api_router.include_router(references.router)
+api_router.include_router(styles.router)
 api_router.include_router(admin.router)

@@ -13,20 +13,30 @@ from __future__ import annotations
 import statistics
 from datetime import datetime, timezone
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agents.reference import (
+    ReferenceAgentContext,
+    ReferenceAnalystAgent,
+    StyleProfilerAgent,
+    TrendAgent,
+    style_profile_data_to_dict,
+)
 from app.core.config import settings
 from app.core.enums import (
     Capability,
     LogLevel,
+    ProfileStatus,
     ReferenceKind,
     ReferenceStatus,
     ReferenceVideoRole,
 )
-from app.db.models import ReferenceSource, ReferenceVideo
+from app.db.models import EditorialDirection, Project, ReferenceSource, ReferenceVideo, StyleProfile
 from app.providers.base import ChannelInfo, SearchRequest, VideoInfo
 from app.providers.router import ProviderRouter
 from app.services.logs import log
+from app.services.transcripts import delete_transcript, read_transcript
 
 # Videos younger than this are excluded from the median-views calculation so a
 # just-published video (which hasn't had time to accumulate views) doesn't
@@ -78,6 +88,8 @@ def ingest_reference(db: Session, source_id: str) -> None:
             _ingest_single_video(db, source, fetch)
         else:
             _ingest_channel(db, source, fetch)
+
+        _run_style_analysis(db, source, router)
 
         source.status = ReferenceStatus.READY
         source.stage = "ready"
@@ -192,6 +204,147 @@ def _ingest_channel(db: Session, source: ReferenceSource, fetch) -> None:
         stage="scoring_outliers",
         project_id=source.project_id,
     )
+
+
+def _run_style_analysis(db: Session, source: ReferenceSource, router: ProviderRouter) -> None:
+    """Fiches -> draft style profile -> editorial directions (Phase 4).
+
+    Every step here is independently best-effort: a failure in profiling or
+    direction discovery must not flip an otherwise-successful reference back
+    to ``failed`` — the metadata and role scoring already gathered are still
+    useful on their own. Without any LLM provider configured, this stops
+    cleanly at "ready" with no profile, exactly as the product spec asks.
+    """
+    if not router.specs(Capability.LLM):
+        log(
+            db,
+            "No LLM provider configured; reference is ready, but no style "
+            "profile or directions were generated.",
+            level=LogLevel.WARNING,
+            stage="analyzing",
+            project_id=source.project_id,
+        )
+        return
+
+    videos = list(
+        db.execute(
+            select(ReferenceVideo).where(
+                ReferenceVideo.source_id == source.id,
+                ReferenceVideo.role != ReferenceVideoRole.NONE,
+            )
+        ).scalars()
+    )
+    if not videos:
+        return
+
+    source.status = ReferenceStatus.ANALYZING
+    source.stage = "analyzing_videos"
+    source.progress = 85
+    db.commit()
+
+    project = db.get(Project, source.project_id) if source.project_id else None
+    ctx = ReferenceAgentContext(db, project, source)
+    analyst = ReferenceAnalystAgent(ctx)
+
+    had_transcript = False
+    for video in videos:
+        transcript = read_transcript(video)
+        had_transcript = had_transcript or bool(transcript)
+        try:
+            analysis = analyst.analyze(video, transcript)
+        except Exception as exc:  # noqa: BLE001 - one bad video shouldn't sink the batch
+            log(
+                db,
+                f"Reference analyst failed for video {video.external_id}: {exc}",
+                level=LogLevel.WARNING,
+                stage="analyzing_videos",
+                project_id=source.project_id,
+            )
+            continue
+        video.analysis = analysis.model_dump(mode="json")
+        delete_transcript(video)
+    db.commit()
+
+    if source.project_id is None:
+        log(
+            db,
+            "Reference has no channel yet; skipping style profile and "
+            "directions, which both require one.",
+            stage="analyzing",
+            project_id=None,
+        )
+        return
+
+    source.stage = "building_profile"
+    source.progress = 92
+    db.commit()
+
+    profiler = StyleProfilerAgent(ctx)
+    try:
+        profile_data = profiler.build_profile(videos, had_transcript=had_transcript)
+    except Exception as exc:  # noqa: BLE001 - keep the reference "ready" regardless
+        log(
+            db,
+            f"Style profiling failed: {exc}",
+            level=LogLevel.WARNING,
+            stage="building_profile",
+            project_id=source.project_id,
+        )
+    else:
+        db.add(
+            StyleProfile(
+                project_id=source.project_id,
+                version=_next_style_profile_version(db, source.project_id),
+                status=ProfileStatus.DRAFT,
+                profile=style_profile_data_to_dict(profile_data),
+                source_ids=[source.id],
+            )
+        )
+        db.commit()
+
+    source.stage = "discovering_directions"
+    source.progress = 97
+    db.commit()
+
+    top_videos = [v for v in videos if v.role == ReferenceVideoRole.TOP]
+    if not top_videos:
+        return
+
+    trend = TrendAgent(ctx)
+    try:
+        directions = trend.discover(project.niche if project else "", top_videos)
+    except Exception as exc:  # noqa: BLE001 - keep the reference "ready" regardless
+        log(
+            db,
+            f"Direction discovery failed: {exc}",
+            level=LogLevel.WARNING,
+            stage="discovering_directions",
+            project_id=source.project_id,
+        )
+        return
+
+    for item in directions:
+        db.add(
+            EditorialDirection(
+                project_id=source.project_id,
+                source_id=source.id,
+                title=item.title,
+                why=item.why,
+                approach=item.approach,
+                evidence=item.evidence.model_dump(mode="json"),
+            )
+        )
+    db.commit()
+
+
+def _next_style_profile_version(db: Session, project_id: str) -> int:
+    existing = [
+        p.version
+        for p in db.execute(
+            select(StyleProfile).where(StyleProfile.project_id == project_id)
+        ).scalars()
+    ]
+    return max(existing, default=0) + 1
 
 
 def _assign_roles(rows: list[ReferenceVideo], median_views: float) -> None:

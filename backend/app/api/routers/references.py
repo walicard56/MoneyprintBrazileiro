@@ -10,8 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthDep, get_db
-from app.core.config import settings
-from app.core.enums import Capability, ReferenceKind, ReferenceVideoRole, TranscriptStatus
+from app.core.enums import Capability, ReferenceKind, ReferenceVideoRole
 from app.db.models import ReferenceSource, ReferenceVideo
 from app.orchestrator.dispatch import start_reference_ingest
 from app.providers.router import ProviderRouter
@@ -21,6 +20,7 @@ from app.schemas.reference import (
     ReferenceVideoRead,
 )
 from app.services.reference_ingest import NO_SEARCH_PROVIDER_MESSAGE
+from app.services.transcripts import write_transcript
 from app.services.url_parse import InvalidYouTubeUrl, ParsedYouTubeUrl, parse_youtube_url
 
 router = APIRouter(tags=["references"], dependencies=[AuthDep])
@@ -44,16 +44,8 @@ def _get_reference_video(db: Session, reference_video_id: str) -> ReferenceVideo
     return video
 
 
-def _transcript_path(reference_video_id: str) -> str:
-    folder = os.path.join(settings.media_root, "reference_transcripts")
-    os.makedirs(folder, exist_ok=True)
-    return os.path.join(folder, f"{reference_video_id}.txt")
-
-
 def _store_transcript(video: ReferenceVideo, text: str, db: Session) -> ReferenceVideo:
-    with open(_transcript_path(video.id), "w", encoding="utf-8") as fh:
-        fh.write(text)
-    video.transcript_status = TranscriptStatus.MANUAL
+    write_transcript(video, text)
     db.commit()
     return video
 
