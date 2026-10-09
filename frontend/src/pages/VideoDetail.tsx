@@ -1,12 +1,28 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { LogEntry, VideoDetail as VideoDetailT, VideoProgress } from "@/api/types";
-import { Button, Card, PageHeader, StatusBadge } from "@/components/ui";
+import { Button, Card, Field, Input, PageHeader, StatusBadge } from "@/components/ui";
+import { pt } from "@/i18n/ptBR";
+
+function parseCostDetail(message: string): number | null {
+  try {
+    const parsed = JSON.parse(message);
+    return typeof parsed?.estimated_cost === "number" ? parsed.estimated_cost : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function VideoDetail() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
+  const [pendingCost, setPendingCost] = useState<number | null>(null);
+  const [changingRequest, setChangingRequest] = useState(false);
+  const [reqTopic, setReqTopic] = useState("");
+  const [reqTone, setReqTone] = useState("");
+  const [reqDuration, setReqDuration] = useState<number | "">("");
 
   const video = useQuery({
     queryKey: ["video", id],
@@ -28,14 +44,44 @@ export default function VideoDetail() {
     mutationFn: () => api.post(`/videos/${id}/run`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["video", id] }),
   });
+
   const approve = useMutation({
-    mutationFn: () => api.post(`/videos/${id}/approve`),
+    mutationFn: (confirmCost: boolean) =>
+      api.post(`/videos/${id}/approve`, confirmCost ? { confirm_cost: true } : undefined),
+    onSuccess: () => {
+      setPendingCost(null);
+      qc.invalidateQueries({ queryKey: ["video", id] });
+    },
+    onError: (err: Error) => {
+      const cost = parseCostDetail(err.message);
+      if (cost != null) setPendingCost(cost);
+    },
+  });
+
+  const regenerate = useMutation({
+    mutationFn: () => api.post(`/videos/${id}/regenerate-script`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["video", id] }),
+  });
+
+  const changeRequest = useMutation({
+    mutationFn: () =>
+      api.patch(`/videos/${id}/request`, {
+        topic: reqTopic || undefined,
+        tone: reqTone || undefined,
+        duration: reqDuration === "" ? undefined : reqDuration,
+      }),
+    onSuccess: () => {
+      setChangingRequest(false);
+      qc.invalidateQueries({ queryKey: ["video", id] });
+    },
   });
 
   if (video.isLoading) return <p className="text-slate-400">Loading…</p>;
   const v = video.data;
   if (!v) return <p className="text-rose-400">Not found.</p>;
+
+  const scriptLocked = Boolean(v.config?.script_locked);
+  const awaitingApproval = v.status === "waiting_approval";
 
   return (
     <div>
@@ -44,9 +90,6 @@ export default function VideoDetail() {
         action={
           <div className="flex items-center gap-2">
             <StatusBadge status={v.status} />
-            {v.status === "waiting_approval" && (
-              <Button onClick={() => approve.mutate()}>Approve &amp; continue</Button>
-            )}
             {["failed", "cancelled", "pending"].includes(v.status) && (
               <Button variant="ghost" onClick={() => run.mutate()}>Run</Button>
             )}
@@ -72,10 +115,66 @@ export default function VideoDetail() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
-          <h2 className="mb-3 text-sm font-semibold text-slate-200">Script</h2>
+          <h2 className="mb-3 text-sm font-semibold text-slate-200">{pt.scriptReview.title}</h2>
           <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
             {v.script?.content || "—"}
           </p>
+
+          {awaitingApproval && v.script && (
+            <div className="mt-4 space-y-3 border-t border-white/10 pt-4">
+              {pendingCost != null && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-300">
+                  {pt.scriptReview.costWarning(pendingCost)}
+                  <div className="mt-2">
+                    <Button onClick={() => approve.mutate(true)}>{pt.scriptReview.confirmCost}</Button>
+                  </div>
+                </div>
+              )}
+
+              {changingRequest ? (
+                <div className="space-y-2 rounded-lg border border-white/10 p-3">
+                  <h3 className="text-xs font-semibold text-slate-300">{pt.scriptReview.changeRequestTitle}</h3>
+                  <Field label="Tema">
+                    <Input value={reqTopic} onChange={(e) => setReqTopic(e.target.value)} placeholder={v.topic} />
+                  </Field>
+                  <Field label="Tom">
+                    <Input value={reqTone} onChange={(e) => setReqTone(e.target.value)} />
+                  </Field>
+                  <Field label="Duração (s)">
+                    <Input
+                      type="number"
+                      value={reqDuration}
+                      onChange={(e) => setReqDuration(e.target.value === "" ? "" : Number(e.target.value))}
+                    />
+                  </Field>
+                  <div className="flex gap-2">
+                    <Button onClick={() => changeRequest.mutate()} disabled={changeRequest.isPending}>
+                      {pt.common.save}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setChangingRequest(false)}>
+                      {pt.common.cancel}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => approve.mutate(false)} disabled={approve.isPending}>
+                    {pt.scriptReview.approve}
+                  </Button>
+                  {!scriptLocked && (
+                    <>
+                      <Button variant="ghost" onClick={() => regenerate.mutate()} disabled={regenerate.isPending}>
+                        {pt.scriptReview.rewrite}
+                      </Button>
+                      <Button variant="ghost" onClick={() => setChangingRequest(true)}>
+                        {pt.scriptReview.changeRequest}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </Card>
 
         <Card>

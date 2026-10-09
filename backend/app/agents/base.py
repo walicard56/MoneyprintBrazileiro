@@ -15,6 +15,17 @@ from app.providers.base import LLMRequest, LLMResponse, Usage
 from app.providers.router import ProviderRouter
 from app.services import logs
 from app.services.agent_config import ResolvedAgentConfig, resolve_agent_config
+from app.services.style_guidance import compile_style_guidance
+
+# Injected into every agent prompt via {locked_notice} when the script is
+# user-provided and must not be reworded (entry_mode="script", Phase 6).
+_SCRIPT_LOCKED_NOTICE = (
+    "CRITICAL: the script above was written by the user and is LOCKED — you "
+    "must NOT rewrite, paraphrase, or alter a single word of it. Only decide "
+    "where to split it into scenes and give each one a brief visual hint "
+    "from context; every scene's \"narration\" must be an exact, "
+    "uninterrupted substring of the original text."
+)
 
 
 class AgentContext:
@@ -47,6 +58,8 @@ class AgentContext:
             "topic": self.video.topic or self.video.idea,
             "idea": self.video.idea,
             "structure": cfg.get("structure", "curiosity"),
+            "style_guidance": compile_style_guidance(self.db, cfg.get("style_profile_id")),
+            "locked_notice": _SCRIPT_LOCKED_NOTICE if cfg.get("script_locked") else "",
         }
 
 

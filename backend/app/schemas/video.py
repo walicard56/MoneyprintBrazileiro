@@ -31,6 +31,25 @@ class BatchCreate(BaseModel):
     autostart: bool = True
 
 
+class ApproveRequest(BaseModel):
+    # Required when GET /videos/{id}/estimate reports a nonzero cost and the
+    # video isn't in auto mode (Phase 6) — never needed for free providers.
+    confirm_cost: bool = False
+
+
+class CostEstimate(BaseModel):
+    estimated_cost: float
+    requires_confirmation: bool
+
+
+class VideoRequestUpdate(BaseModel):
+    """"Mudar o pedido": edit the brief and reopen the script stage."""
+
+    topic: str | None = None
+    tone: str | None = None
+    duration: int | None = None
+
+
 class SceneRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

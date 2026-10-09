@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from app.core.enums import AgentType, Stage
-from app.db.models import Script
+from app.db.models import EditorialDirection, Script
 from app.agents.base import BaseAgent
 
 
@@ -21,6 +21,21 @@ class ResearchAgent(BaseAgent):
     def run(self) -> None:
         if not self.ctx.video.topic and self.ctx.video.idea:
             self.ctx.video.topic = self.ctx.video.idea
+
+        # entry_mode="discover": the editorial direction's own opportunity
+        # evidence IS the research — asking the LLM again would be redundant
+        # and risks drifting away from the reason this topic was suggested.
+        direction_id = self.ctx.video.config.get("direction_id")
+        if direction_id:
+            direction = self.ctx.db.get(EditorialDirection, direction_id)
+            if direction is not None:
+                notes = f"Opportunity: {direction.why}\nApproach: {direction.approach}"
+                cfg = dict(self.ctx.video.config)
+                cfg["research_notes"] = notes
+                self.ctx.video.config = cfg
+                self.log("Used the editorial direction's opportunity/approach as research notes.")
+                return
+
         prompt = self.render_prompt()
         try:
             notes = self.complete(prompt)

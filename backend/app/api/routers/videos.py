@@ -7,13 +7,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthDep, get_db
-from app.core.enums import Stage, Status
+from app.core.enums import RunMode, Stage, Status
 from app.db.models import Job, LogEntry, Project, Publication, Scene, Video
 from app.orchestrator.dispatch import start_pipeline
-from app.orchestrator.engine import approve_and_continue
+from app.orchestrator.engine import apply_entry_mode, approve_and_continue
 from app.schemas.account import PublicationRead
 from app.schemas.video import (
+    ApproveRequest,
     BatchCreate,
+    CostEstimate,
     JobRead,
     LogRead,
     PublishRequest,
@@ -23,9 +25,12 @@ from app.schemas.video import (
     VideoDetail,
     VideoProgress,
     VideoRead,
+    VideoRequestUpdate,
     StageState,
 )
+from app.services.costs import estimate_remaining_cost
 from app.services.publishing import create_publications
+from app.services.style_guidance import apply_style_defaults
 
 router = APIRouter(tags=["videos"], dependencies=[AuthDep])
 
@@ -52,6 +57,7 @@ def create_video(
     config = dict(payload.config)
     config.setdefault("duration", project.default_duration)
     config.setdefault("platform", config.get("platform", "tiktok"))
+    _pin_active_style(db, project, config)
 
     video = Video(
         project_id=project_id,
@@ -68,9 +74,25 @@ def create_video(
     db.commit()
     db.refresh(video)
 
+    apply_entry_mode(db, video)
+    db.commit()
+    db.refresh(video)
+
     if payload.autostart:
         start_pipeline(video.id)
     return video
+
+
+def _pin_active_style(db: Session, project: Project, config: dict) -> None:
+    """Fix the channel's active style profile onto a new video's config and
+    apply its derived defaults, without touching anything the caller already
+    set explicitly (Phase 6, D2: videos never move with a profile after
+    creation — they keep whatever was active at the moment they were made)."""
+    active_profile_id = (project.config or {}).get("active_style_profile_id")
+    if not active_profile_id or "style_profile_id" in config:
+        return
+    config["style_profile_id"] = active_profile_id
+    apply_style_defaults(db, config, active_profile_id)
 
 
 @router.post(
@@ -96,6 +118,7 @@ def create_videos_batch(
         config = dict(payload.config)
         config.setdefault("duration", project.default_duration)
         config.setdefault("platform", config.get("platform", "tiktok"))
+        _pin_active_style(db, project, config)
         video = Video(
             project_id=project_id,
             idea=topic,
@@ -176,15 +199,92 @@ def run_video(video_id: str, db: Session = Depends(get_db)) -> Video:
     return video
 
 
+@router.get("/videos/{video_id}/estimate", response_model=CostEstimate)
+def estimate_video_cost(video_id: str, db: Session = Depends(get_db)) -> CostEstimate:
+    video = _get_video(db, video_id)
+    cost = estimate_remaining_cost(db, video)
+    return CostEstimate(
+        estimated_cost=cost,
+        requires_confirmation=cost > 0 and video.mode != RunMode.AUTO,
+    )
+
+
 @router.post("/videos/{video_id}/approve", response_model=VideoRead)
-def approve_video(video_id: str, db: Session = Depends(get_db)) -> Video:
+def approve_video(
+    video_id: str, payload: ApproveRequest | None = None, db: Session = Depends(get_db)
+) -> Video:
     video = _get_video(db, video_id)
     if video.status != Status.WAITING_APPROVAL:
         raise HTTPException(status_code=409, detail="Video is not awaiting approval.")
+
+    if video.mode != RunMode.AUTO:
+        estimated = estimate_remaining_cost(db, video)
+        confirmed = payload.confirm_cost if payload else False
+        if estimated > 0 and not confirmed:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "message": "This video has estimated paid costs remaining. "
+                    "Resend with confirm_cost: true to proceed.",
+                    "estimated_cost": estimated,
+                },
+            )
+
     approve_and_continue(db, video)
     start_pipeline(video.id)
     db.refresh(video)
     return video
+
+
+@router.post("/videos/{video_id}/regenerate-script", response_model=VideoRead)
+def regenerate_script(video_id: str, db: Session = Depends(get_db)) -> Video:
+    """"Escrever outro roteiro": keep the same topic/style, rewrite the script."""
+    video = _get_video(db, video_id)
+    if video.config.get("script_locked"):
+        raise HTTPException(
+            status_code=409, detail="This video's script was provided by the user and is locked."
+        )
+    _reopen_stages(video, [Stage.SCRIPT, Stage.REVIEW])
+    db.commit()
+    start_pipeline(video.id)
+    db.refresh(video)
+    return video
+
+
+@router.patch("/videos/{video_id}/request", response_model=VideoRead)
+def update_video_request(
+    video_id: str, payload: VideoRequestUpdate, db: Session = Depends(get_db)
+) -> Video:
+    """"Mudar o pedido": edit topic/tone/duration and rewrite the script."""
+    video = _get_video(db, video_id)
+    if video.config.get("script_locked"):
+        raise HTTPException(
+            status_code=409, detail="This video's script was provided by the user and is locked."
+        )
+
+    if payload.topic is not None:
+        video.topic = payload.topic
+    config = dict(video.config)
+    if payload.tone is not None:
+        config["tone"] = payload.tone
+    if payload.duration is not None:
+        config["duration"] = payload.duration
+    video.config = config
+
+    _reopen_stages(video, [Stage.RESEARCH, Stage.SCRIPT, Stage.REVIEW])
+    db.commit()
+    start_pipeline(video.id)
+    db.refresh(video)
+    return video
+
+
+def _reopen_stages(video: Video, stages: list[Stage]) -> None:
+    status_map = dict(video.stage_status or {})
+    for stage in stages:
+        status_map.pop(stage.value, None)
+    video.stage_status = status_map
+    video.status = Status.PENDING
+    video.error = ""
 
 
 @router.post("/videos/{video_id}/cancel", response_model=VideoRead)

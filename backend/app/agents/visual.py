@@ -2,9 +2,28 @@
 
 from __future__ import annotations
 
+import re
+
 from app.core.enums import AgentType, Stage, Status
 from app.db.models import Character, Scene
 from app.agents.base import BaseAgent
+
+# Only the bracket convention from docs/PROMPT_CANAIS.md ("[imagem: ...]" /
+# "[image: ...]") is stripped from a locked script's narration. The spec also
+# mentions parenthetical "direction" asides, but with no concrete marker for
+# telling those apart from a normal spoken parenthetical ("the study
+# (published in 2019) found..."), stripping all parens risked mangling real
+# narration — so that part was deliberately left out; flag if you want it.
+_BRACKET_RE = re.compile(r"\[[^\]]*\]")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _strip_ws(text: str) -> str:
+    return re.sub(r"\s+", "", text)
+
+
+def _strip_brackets(text: str) -> str:
+    return re.sub(r"\s+", " ", _BRACKET_RE.sub(" ", text)).strip()
 
 
 class StoryboardAgent(BaseAgent):
@@ -18,25 +37,57 @@ class StoryboardAgent(BaseAgent):
         if script is None or not script.content:
             raise ValueError("Cannot storyboard without a script.")
 
-        prompt = self.render_prompt(script=script.content)
-        data = self.parse_json(self.complete(prompt, json_mode=False))
+        if self.ctx.video.config.get("script_locked"):
+            data = self._split_locked(script.content)
+        else:
+            prompt = self.render_prompt(script=script.content)
+            data = self.parse_json(self.complete(prompt, json_mode=False))
+            if isinstance(data, dict):
+                data = data.get("scenes", [])
+            if not isinstance(data, list) or not data:
+                raise ValueError("Storyboard did not return any scenes.")
+            data = [item if isinstance(item, dict) else {"narration": str(item)} for item in data]
+
+        self._replace_scenes(data)
+        self.log(f"Created {len(data)} scenes.")
+
+    def _split_locked(self, raw_text: str) -> list[dict]:
+        """entry_mode="script": split without rewriting a single word.
+
+        Tries the LLM first (it can place smarter scene breaks and infer a
+        visual hint per scene), but only accepts its answer if every scene's
+        narration, concatenated, reproduces the original text exactly
+        (ignoring whitespace) — otherwise a word-preserving sentence split
+        is used instead.
+        """
+        target = _strip_ws(_strip_brackets(raw_text))
+        items = self._try_llm_split(raw_text)
+        if items is not None:
+            concatenated = _strip_ws("".join(str(i.get("narration", "")) for i in items))
+            if concatenated == target:
+                return items
+        self.log("script_locked: LLM split didn't preserve the text exactly; using a sentence split.")
+        return _deterministic_split(raw_text)
+
+    def _try_llm_split(self, raw_text: str) -> list[dict] | None:
+        prompt = self.render_prompt(script=raw_text)
+        try:
+            data = self.parse_json(self.complete(prompt, json_mode=False))
+        except Exception:  # noqa: BLE001 - any failure here just falls back
+            return None
         if isinstance(data, dict):
             data = data.get("scenes", [])
         if not isinstance(data, list) or not data:
-            raise ValueError("Storyboard did not return any scenes.")
+            return None
+        return [item if isinstance(item, dict) else {"narration": str(item)} for item in data]
 
+    def _replace_scenes(self, data: list[dict]) -> None:
         # Replace any existing scenes.
         for existing in list(self.ctx.video.scenes):
             self.ctx.db.delete(existing)
         self.ctx.db.flush()
 
         for index, item in enumerate(data, start=1):
-            # Not every model follows the requested "array of objects" shape
-            # strictly (seen for real: a flat array of plain strings) — treat
-            # a non-dict item as its own narration rather than crashing the
-            # whole pipeline on an AttributeError.
-            if not isinstance(item, dict):
-                item = {"narration": str(item)}
             scene = Scene(
                 video_id=self.ctx.video.id,
                 index=index,
@@ -47,7 +98,20 @@ class StoryboardAgent(BaseAgent):
                 status=Status.PENDING,
             )
             self.ctx.db.add(scene)
-        self.log(f"Created {len(data)} scenes.")
+
+
+def _deterministic_split(raw_text: str) -> list[dict]:
+    """Word-preserving fallback: one scene per sentence, with that
+    sentence's own [bracketed] hints moved into visual_description."""
+    sentences = [s for s in _SENTENCE_SPLIT_RE.split(raw_text.strip()) if s.strip()]
+    scenes: list[dict] = []
+    for sentence in sentences:
+        hints = [h.strip("[] ") for h in _BRACKET_RE.findall(sentence)]
+        narration = _strip_brackets(sentence)
+        if not narration:
+            continue  # a chunk that was only a bracketed instruction, no spoken words
+        scenes.append({"narration": narration, "visual_description": "; ".join(hints)})
+    return scenes or [{"narration": _strip_brackets(raw_text), "visual_description": ""}]
 
 
 class CharacterDesignerAgent(BaseAgent):

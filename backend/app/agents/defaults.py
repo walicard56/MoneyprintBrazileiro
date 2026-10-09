@@ -35,6 +35,7 @@ Platform: {platform}
 Target duration: {duration} seconds
 Tone/style: {style}
 Narrative structure: {structure}
+{style_guidance}
 
 Rules:
 - Open with a strong hook in the first 2 seconds that creates curiosity.
@@ -52,6 +53,7 @@ _SCRIPT_REVIEWER_PROMPT = """You are a ruthless short-form video editor. Improve
 Evaluate: hook strength, retention, pacing, curiosity, storytelling, and CTA.
 Fix weaknesses. Keep it in {language}, keep roughly {word_count} words, keep the
 spoken-only format (no directions/labels/markdown).
+{style_guidance}
 
 Return ONLY the improved narration text.
 
@@ -63,6 +65,8 @@ _STORYBOARD_PROMPT = """Break the narration into a sequence of short video scene
 Topic: {topic}
 Style: {style}
 Target total duration: {duration} seconds.
+{style_guidance}
+{locked_notice}
 
 For each scene provide: the exact narration substring for that scene, an
 approximate duration in seconds, a one-line visual description, and any
