@@ -341,6 +341,77 @@ def test_trend_agent_builds_candidates_from_series_and_clusters_in_facts(db: Ses
     assert directions[0].evidence.video_external_id == "s0"
 
 
+def test_style_profiler_fills_ritmo_and_musica_from_channel_grammar(db: Session) -> None:
+    """Etapa 3 acceptance: once the Laboratório de vídeo has measured
+    enough videos, ritmo/música items stop being null — and the real
+    number comes from the grammar, not whatever the LLM guessed."""
+    _add_llm_provider(db)
+    project = _project(db)
+    _SCRIPT["next"] = json.dumps(
+        {
+            "roteiro": {},
+            "titulos": {},
+            "imagens": {},
+            "ritmo": {
+                "corte_mediano_s": {"value": None, "why": "precisa do arquivo de midia", "confidence": "low", "accepted": True},
+                "palavras_por_minuto": {"value": None, "why": "precisa do arquivo de midia", "confidence": "low", "accepted": True},
+            },
+            "legenda": {},
+            "musica": {
+                "nivel_relativo_db": {"value": None, "why": "precisa do arquivo de midia", "confidence": "low", "accepted": True},
+            },
+            "voz": {},
+            "nao_replicavel": [],
+            "meta": {},
+        }
+    )
+    videos = [_reference_video(external_id="v1", role=ReferenceVideoRole.TOP, analysis={"a": "b"})]
+    channel_grammar = {
+        "videos_analyzed": 5,
+        "scene_duration_median_s": {"value": 6.2, "confidence": "high", "n": 5},
+        "avg_wpm": {"value": 165.0, "confidence": "high", "n": 5},
+        "loudness_lufs": {"value": -16.5, "confidence": "medium", "n": 4},
+    }
+
+    ctx = ReferenceAgentContext(db, project)
+    data = StyleProfilerAgent(ctx).build_profile(videos, had_transcript=False, channel_grammar=channel_grammar)
+
+    assert data.ritmo["corte_mediano_s"].value == 6.2
+    assert data.ritmo["corte_mediano_s"].confidence == "high"
+    assert data.ritmo["corte_mediano_s"].accepted is True
+    assert data.ritmo["palavras_por_minuto"].value == 165.0
+    assert data.musica["nivel_relativo_db"].value == -16.5
+    assert data.musica["nivel_relativo_db"].confidence == "medium"
+    assert "5 vídeos" in data.ritmo["corte_mediano_s"].why
+
+
+def test_style_profiler_leaves_grammar_fields_null_without_channel_grammar(db: Session) -> None:
+    _add_llm_provider(db)
+    project = _project(db)
+    _SCRIPT["next"] = json.dumps(
+        {
+            "roteiro": {},
+            "titulos": {},
+            "imagens": {},
+            "ritmo": {
+                "corte_mediano_s": {"value": None, "why": "x", "confidence": "low", "accepted": True},
+            },
+            "legenda": {},
+            "musica": {},
+            "voz": {},
+            "nao_replicavel": [],
+            "meta": {},
+        }
+    )
+    videos = [_reference_video(external_id="v1", role=ReferenceVideoRole.TOP, analysis={"a": "b"})]
+
+    ctx = ReferenceAgentContext(db, project)
+    data = StyleProfilerAgent(ctx).build_profile(videos, had_transcript=False, channel_grammar=None)
+
+    assert data.ritmo["corte_mediano_s"].value is None
+    assert data.ritmo["corte_mediano_s"].accepted is False
+
+
 def test_style_profiler_forces_accepted_false_for_null_or_low_confidence(db: Session) -> None:
     """Etapa 1, item 3: the LLM is asked to always write accepted=true — the
     real accept/reject decision happens in code, not from the model's say-so."""

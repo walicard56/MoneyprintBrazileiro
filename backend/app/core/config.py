@@ -108,6 +108,16 @@ class Settings(BaseSettings):
     # (D4), shared with everything else that might use it.
     discover_daily_searches: int = 20
 
+    # --- Laboratório de vídeo (Etapa 3): uploaded-file analysis ---
+    lab_max_duration_s: int = 900
+    lab_max_upload_mb: int = 500
+    lab_retention_days: int = 7
+    lab_keep_media: bool = False
+    # Link-based (yt-dlp) fetch into the lab, as opposed to a user upload —
+    # off by default, same posture as unofficial transcripts (D3): the risk
+    # of a platform ban/ToS issue is the project owner's own decision.
+    enable_link_fetch: bool = False
+
     @property
     def broker_url(self) -> str:
         return self.celery_broker_url or self.redis_url

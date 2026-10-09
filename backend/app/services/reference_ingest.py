@@ -33,7 +33,14 @@ from app.core.enums import (
     ReferenceStatus,
     ReferenceVideoRole,
 )
-from app.db.models import EditorialDirection, Project, ReferenceSource, ReferenceVideo, StyleProfile
+from app.db.models import (
+    ChannelGrammar,
+    EditorialDirection,
+    Project,
+    ReferenceSource,
+    ReferenceVideo,
+    StyleProfile,
+)
 from app.providers.base import ChannelInfo, SearchRequest, VideoInfo
 from app.providers.router import ProviderRouter
 from app.services.channel_facts import ChannelFacts, compute_channel_facts
@@ -311,10 +318,21 @@ def _run_style_analysis(db: Session, source: ReferenceSource, router: ProviderRo
     source.progress = 92
     db.commit()
 
+    channel_grammar = None
+    if source.project_id:
+        channel_grammar_row = db.execute(
+            select(ChannelGrammar).where(ChannelGrammar.project_id == source.project_id)
+        ).scalar_one_or_none()
+        channel_grammar = channel_grammar_row.grammar if channel_grammar_row else None
+
     profiler = StyleProfilerAgent(ctx)
     try:
         profile_data = profiler.build_profile(
-            videos, had_transcript=had_transcript, facts=facts, thumbnail_traits=thumbnail_traits
+            videos,
+            had_transcript=had_transcript,
+            facts=facts,
+            thumbnail_traits=thumbnail_traits,
+            channel_grammar=channel_grammar,
         )
     except Exception as exc:  # noqa: BLE001 - keep the reference "ready" regardless
         log(

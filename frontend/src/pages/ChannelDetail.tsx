@@ -3,14 +3,17 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type {
+  ChannelGrammar,
   DirectionStatus,
   EditorialDirection,
+  LabScene,
   Project,
   ReferenceSource,
   ReferenceVideo,
   StyleProfile,
   StyleProfileItem,
   Video,
+  VideoLabRun,
 } from "@/api/types";
 import {
   Button,
@@ -237,7 +240,205 @@ function ReferencesTab({ projectId }: { projectId: string }) {
       <div className="space-y-3">
         {sources.data?.map((s) => <ReferenceCard key={s.id} source={s} />)}
       </div>
+
+      <LabPanel projectId={projectId} />
     </div>
+  );
+}
+
+/* --------------------------------------------------------- Laboratório de vídeo */
+
+const IN_PROGRESS_LAB = new Set(["pending", "running"]);
+
+function LabPanel({ projectId }: { projectId: string }) {
+  const qc = useQueryClient();
+  const [runId, setRunId] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const upload = useMutation({
+    mutationFn: (file: File) => {
+      const body = new FormData();
+      body.set("file", file);
+      body.set("project_id", projectId);
+      return api.postForm<VideoLabRun>("/lab/runs", body);
+    },
+    onSuccess: (run) => setRunId(run.id),
+  });
+
+  const run = useQuery({
+    queryKey: ["lab-run", runId],
+    queryFn: () => api.get<VideoLabRun>(`/lab/runs/${runId}`),
+    enabled: !!runId,
+    refetchInterval: (query) => {
+      const data = query.state.data as VideoLabRun | undefined;
+      return data && IN_PROGRESS_LAB.has(data.status) ? 1500 : false;
+    },
+  });
+
+  const scenes = useQuery({
+    queryKey: ["lab-scenes", runId],
+    queryFn: () => api.get<LabScene[]>(`/lab/runs/${runId}/scenes`),
+    enabled: !!runId && run.data?.status === "ready",
+  });
+
+  const channelGrammar = useQuery({
+    queryKey: ["channel-grammar", projectId],
+    queryFn: () => api.get<ChannelGrammar>(`/projects/${projectId}/grammar`),
+    retry: false,
+  });
+
+  const removeRun = useMutation({
+    mutationFn: () => api.del(`/lab/runs/${runId}`),
+    onSuccess: () => {
+      setRunId(null);
+      qc.invalidateQueries({ queryKey: ["channel-grammar", projectId] });
+    },
+  });
+
+  function onFile(file: File | undefined | null) {
+    if (file) upload.mutate(file);
+  }
+
+  const totalDuration = scenes.data?.reduce((sum, s) => sum + s.duration_s, 0) || 1;
+  const grammar = channelGrammar.data?.grammar;
+
+  return (
+    <Card>
+      <h3 className="text-sm font-semibold text-slate-100">{pt.lab.title}</h3>
+      <p className="mt-1 text-xs text-slate-500">{pt.lab.hint}</p>
+      <p className="mt-2 text-xs text-amber-400">{pt.lab.disclaimer}</p>
+
+      {!runId && (
+        <label
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            onFile(e.dataTransfer.files?.[0]);
+          }}
+          className={`mt-3 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center text-xs text-slate-500 transition ${
+            dragOver ? "border-brand-500 bg-brand-500/5" : "border-white/10"
+          }`}
+        >
+          {upload.isPending ? pt.lab.uploading : pt.lab.dropHint}
+          <input
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={(e) => onFile(e.target.files?.[0])}
+            disabled={upload.isPending}
+          />
+        </label>
+      )}
+      {upload.isError && <p className="mt-2 text-xs text-rose-400">{(upload.error as Error).message}</p>}
+
+      {runId && run.data && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between">
+            <Tag color={run.data.status === "ready" ? "emerald" : run.data.status === "failed" ? "amber" : "brand"}>
+              {pt.lab.statusLabels[run.data.status]}
+            </Tag>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => setRunId(null)}>
+                {pt.common.cancel}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  if (confirm(pt.lab.removeConfirm)) removeRun.mutate();
+                }}
+              >
+                {pt.lab.remove}
+              </Button>
+            </div>
+          </div>
+
+          {IN_PROGRESS_LAB.has(run.data.status) && (
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-brand-500 to-violet-500 transition-all"
+                style={{ width: `${run.data.progress}%` }}
+              />
+            </div>
+          )}
+          {run.data.status === "failed" && (
+            <p className="mt-2 text-xs text-rose-400">{run.data.error || pt.lab.error}</p>
+          )}
+
+          {run.data.status === "ready" && scenes.data && scenes.data.length > 0 && (
+            <div className="mt-4 space-y-4">
+              <div>
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {pt.lab.scenesTitle}
+                </h4>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6">
+                  {scenes.data.map((scene) => (
+                    <div key={scene.id} className="overflow-hidden rounded-lg border border-white/10 bg-white/5">
+                      <img
+                        src={`/api/v1/lab/runs/${runId}/scenes/${scene.index}/thumb`}
+                        alt=""
+                        className="aspect-video w-full object-cover"
+                      />
+                      <div className="p-1.5 text-[10px] text-slate-400">
+                        <div className="flex items-center justify-between">
+                          <span>{scene.duration_s.toFixed(1)}s</span>
+                          <span className="flex gap-1">
+                            {(scene.fade_in || scene.fade_out) && <span title={pt.lab.fadeIcon}>〜</span>}
+                            {scene.has_caption && <span title={pt.lab.captionIcon}>CC</span>}
+                          </span>
+                        </div>
+                        {scene.beat_role && (
+                          <Tag color="violet">
+                            {pt.lab.beatLabels[scene.beat_role as keyof typeof pt.lab.beatLabels] ?? scene.beat_role}
+                          </Tag>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {pt.lab.rhythmTitle}
+                </h4>
+                <div className="flex h-6 w-full overflow-hidden rounded-full bg-white/5">
+                  {scenes.data.map((scene) => (
+                    <div
+                      key={scene.id}
+                      title={`${pt.lab.beatLabels[scene.beat_role as keyof typeof pt.lab.beatLabels] ?? scene.beat_role} · ${scene.duration_s.toFixed(1)}s`}
+                      className="h-full border-r border-night/50 bg-gradient-to-b from-brand-500/70 to-violet-500/70"
+                      style={{ width: `${(scene.duration_s / totalDuration) * 100}%` }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {grammar && channelGrammar.data && (
+        <div className="mt-4 border-t border-white/10 pt-3">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {pt.lab.channelGrammarTitle} — {pt.lab.measuredIn(channelGrammar.data.videos_analyzed)}
+          </h4>
+          <div className="flex flex-wrap gap-3 text-xs text-slate-400">
+            {grammar.scene_duration_median_s?.value != null && (
+              <span>corte mediano: {grammar.scene_duration_median_s.value.toFixed(1)}s</span>
+            )}
+            {grammar.avg_wpm?.value != null && <span>{Math.round(grammar.avg_wpm.value)} palavras/min</span>}
+            {grammar.loudness_lufs?.value != null && (
+              <span>{grammar.loudness_lufs.value.toFixed(1)} LUFS</span>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 

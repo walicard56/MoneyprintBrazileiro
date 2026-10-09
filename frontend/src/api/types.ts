@@ -406,3 +406,70 @@ export interface EditorialDirection {
   created_at: string;
   updated_at: string;
 }
+
+// --- Laboratório de vídeo (Etapa 3) ---
+
+export type LabRunStatus = "pending" | "running" | "ready" | "failed";
+export type LabSource = "upload" | "link";
+
+export interface VideoLabRun {
+  id: string;
+  project_id: string | null;
+  reference_video_id: string | null;
+  source: LabSource;
+  status: LabRunStatus;
+  stage: string;
+  progress: number;
+  error: string;
+  params: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LabScene {
+  id: string;
+  run_id: string;
+  index: number;
+  start_s: number;
+  end_s: number;
+  duration_s: number;
+  anchor_thumb: string;
+  last_thumb: string;
+  fade_in: boolean;
+  fade_out: boolean;
+  wpm: number | null;
+  has_caption: boolean;
+  palette: string[];
+  vision: Record<string, unknown>;
+  beat_role: string;
+}
+
+export interface VideoGrammar {
+  id: string;
+  run_id: string;
+  grammar: Record<string, unknown>;
+}
+
+export interface GrammarField {
+  value: number | null;
+  confidence: "low" | "medium" | "high";
+  n: number;
+}
+
+export interface ChannelGrammar {
+  id: string;
+  project_id: string;
+  grammar: {
+    videos_analyzed?: number;
+    scene_duration_median_s?: GrammarField;
+    cuts_per_min_hook?: GrammarField;
+    cuts_per_min_body?: GrammarField;
+    avg_wpm?: GrammarField;
+    pct_scenes_with_fade?: GrammarField;
+    pct_scenes_with_caption?: GrammarField;
+    loudness_lufs?: GrammarField;
+    silence_ratio?: GrammarField;
+    palette?: string[];
+  };
+  videos_analyzed: number;
+}

@@ -31,6 +31,8 @@ from app.core.enums import (
     ConfigHistorySource,
     DirectionStatus,
     KeyStatus,
+    LabRunStatus,
+    LabSource,
     LogLevel,
     Platform,
     ProfileStatus,
@@ -698,3 +700,100 @@ class DiscoverySearchLog(UUIDMixin, TimestampMixin, Base):
     against ``MP_DISCOVER_DAILY_SEARCHES`` per UTC day."""
 
     __tablename__ = "discovery_search_log"
+
+
+class VideoLabRun(UUIDMixin, TimestampMixin, Base):
+    """One Laboratório de vídeo analysis of a single user-uploaded (or,
+    behind ``MP_ENABLE_LINK_FETCH``, linked) video (Etapa 3).
+
+    The uploaded video itself is deleted right after analysis; only
+    thumbnails survive, and only for ``MP_LAB_RETENTION_DAYS`` — see
+    ``LabScene.private`` and the ``lab.purge_expired`` beat task.
+    """
+
+    __tablename__ = "video_lab_runs"
+
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reference_video_id: Mapped[str | None] = mapped_column(
+        ForeignKey("reference_videos.id", ondelete="SET NULL"), nullable=True
+    )
+    source: Mapped[LabSource] = mapped_column(SAEnum(LabSource), default=LabSource.UPLOAD)
+    status: Mapped[LabRunStatus] = mapped_column(
+        SAEnum(LabRunStatus), default=LabRunStatus.PENDING, index=True
+    )
+    stage: Mapped[str] = mapped_column(String(100), default="")
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    # lang, prompt_terms, autotune threshold/attempts actually used, etc.
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    media_path: Mapped[str] = mapped_column(String(500), default="")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    scenes: Mapped[list["LabScene"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", order_by="LabScene.index"
+    )
+    grammar: Mapped["VideoGrammar | None"] = relationship(
+        back_populates="run", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class LabScene(UUIDMixin, TimestampMixin, Base):
+    """One detected scene within a ``VideoLabRun`` — thumbnails and
+    measured numbers only; ``private`` (OCR'd on-screen text, anything
+    else transiently useful only to the uploader) is wiped by
+    ``lab.purge_expired`` and never used for generation (D6)."""
+
+    __tablename__ = "lab_scenes"
+    __table_args__ = (UniqueConstraint("run_id", "index", name="uq_lab_scene_run_index"),)
+
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("video_lab_runs.id", ondelete="CASCADE"), index=True
+    )
+    index: Mapped[int] = mapped_column(Integer, default=0)
+    start_s: Mapped[float] = mapped_column(Float, default=0.0)
+    end_s: Mapped[float] = mapped_column(Float, default=0.0)
+    duration_s: Mapped[float] = mapped_column(Float, default=0.0)
+    anchor_thumb: Mapped[str] = mapped_column(String(500), default="")
+    last_thumb: Mapped[str] = mapped_column(String(500), default="")
+    fade_in: Mapped[bool] = mapped_column(Boolean, default=False)
+    fade_out: Mapped[bool] = mapped_column(Boolean, default=False)
+    wpm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    has_caption: Mapped[bool] = mapped_column(Boolean, default=False)
+    palette: Mapped[list[str]] = mapped_column(JSON, default=list)
+    vision: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    beat_role: Mapped[str] = mapped_column(String(50), default="")
+    # OCR'd text, spoken words — ephemeral, deleted on expiry/DELETE, never
+    # feeds generation (D6's "análise privada" layer).
+    private: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    run: Mapped["VideoLabRun"] = relationship(back_populates="scenes")
+
+
+class VideoGrammar(UUIDMixin, TimestampMixin, Base):
+    """The permanent, abstract "grammar" extracted from one lab run (D6) —
+    numbers and labels only, built by ``engine.video_lab.grammar``."""
+
+    __tablename__ = "video_grammars"
+
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("video_lab_runs.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    grammar: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    run: Mapped["VideoLabRun"] = relationship(back_populates="grammar")
+
+
+class ChannelGrammar(UUIDMixin, TimestampMixin, Base):
+    """Aggregated grammar across every lab run analyzed for a channel
+    (``Project``) — feeds the style profile's ritmo/música/legenda fields
+    once there are enough videos (``aggregate_channel_grammar``)."""
+
+    __tablename__ = "channel_grammars"
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    grammar: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    videos_analyzed: Mapped[int] = mapped_column(Integer, default=0)

@@ -36,6 +36,17 @@ dev = [
 engine = [
     "ollama==0.4.5",
 ]
+# Laboratório de vídeo (Etapa 3): scene detection, audio/whisper, imaging —
+# only needed by engine/video_lab/, never imported at API boot. ffmpeg and
+# tesseract remain system binaries, detected at runtime, not pip packages.
+lab = [
+    "scenedetect==0.6.5.2",
+    "opencv-python-headless==4.10.0.84",
+    "imageio-ffmpeg==0.6.0",
+    "faster-whisper==1.1.0",
+    "numpy==1.26.4",
+    "pytesseract==0.3.13",
+]
 
 [tool.ruff]
 line-length = 100

@@ -49,6 +49,27 @@ export default function Settings() {
         </div>
       </Card>
 
+      <Card className="mb-4 max-w-xl">
+        <h2 className="mb-3 text-sm font-semibold text-slate-200">Laboratório (Etapa 3)</h2>
+        <p className="mb-3 text-xs text-slate-500">
+          Limites e retenção do Laboratório de vídeo, configurados no backend (<code className="rounded bg-inset px-1.5 py-0.5 font-mono text-[11px] text-brand-300">.env</code>), não aqui.
+        </p>
+        <ul className="space-y-1.5 text-xs text-slate-400">
+          <li>
+            Duração máxima por vídeo: <code className="rounded bg-inset px-1.5 py-0.5 font-mono text-[11px] text-brand-300">MP_LAB_MAX_DURATION_S</code> (padrão 900s / 15 min)
+          </li>
+          <li>
+            Tamanho máximo do arquivo: <code className="rounded bg-inset px-1.5 py-0.5 font-mono text-[11px] text-brand-300">MP_LAB_MAX_UPLOAD_MB</code> (padrão 500 MB)
+          </li>
+          <li>
+            Retenção das miniaturas: <code className="rounded bg-inset px-1.5 py-0.5 font-mono text-[11px] text-brand-300">MP_LAB_RETENTION_DAYS</code> (padrão 7 dias) — o vídeo enviado é sempre apagado logo após a análise
+          </li>
+          <li>
+            Adaptador de link (yt-dlp): <code className="rounded bg-inset px-1.5 py-0.5 font-mono text-[11px] text-brand-300">MP_ENABLE_LINK_FETCH</code> — <strong className="text-amber-400">desligado por padrão</strong>. Ligar é uma decisão sua: pode violar os Termos de Uso da plataforma de origem e sujeitar sua chave/IP a bloqueio. Não há um botão aqui de propósito — mude a variável de ambiente e reinicie o backend se aceitar o risco.
+          </li>
+        </ul>
+      </Card>
+
       <Card className="max-w-xl">
         <h2 className="mb-3 text-sm font-semibold text-slate-200">Seed defaults</h2>
         <p className="mb-3 text-xs text-slate-500">

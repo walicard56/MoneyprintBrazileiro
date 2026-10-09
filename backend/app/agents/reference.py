@@ -30,6 +30,7 @@ from app.schemas.reference import (
     EditorialDirectionItem,
     ReferenceVideoAnalysis,
     StyleProfileData,
+    StyleProfileItem,
 )
 from app.services import logs
 from app.services.agent_config import ResolvedAgentConfig, resolve_agent_config
@@ -172,6 +173,40 @@ class ReferenceAnalystAgent(BaseServiceAgent):
         return self.complete_json(prompt, TypeAdapter(ReferenceVideoAnalysis))
 
 
+# Which StyleProfileData item each ChannelGrammar field can actually fill —
+# only ritmo/música have a Laboratório-measured counterpart (D6/Etapa 3);
+# legenda.estilo and imagens.* are descriptive, not something the lab's
+# numbers alone can write.
+_GRAMMAR_FIELD_MAP = {
+    ("ritmo", "corte_mediano_s"): "scene_duration_median_s",
+    ("ritmo", "palavras_por_minuto"): "avg_wpm",
+    ("musica", "nivel_relativo_db"): "loudness_lufs",
+}
+
+
+def _apply_channel_grammar(data: StyleProfileData, grammar: dict[str, Any] | None) -> None:
+    """Overwrites the ritmo/música items the Laboratório de vídeo can
+    actually measure with the real, code-computed number — never trusts
+    the LLM to transcribe these correctly (same reasoning as the accepted
+    invariant below)."""
+    if not grammar:
+        return
+    for (section_name, key), grammar_key in _GRAMMAR_FIELD_MAP.items():
+        field = grammar.get(grammar_key)
+        if not isinstance(field, dict) or field.get("value") is None:
+            continue
+        section = getattr(data, section_name, None)
+        if not isinstance(section, dict):
+            continue
+        n = field.get("n", 0)
+        section[key] = StyleProfileItem(
+            value=round(field["value"], 1),
+            why=f"medido em {n} vídeo{'s' if n != 1 else ''} no Laboratório de vídeo",
+            confidence=field.get("confidence", "low"),
+            accepted=True,
+        )
+
+
 def _enforce_accepted_invariant(data: StyleProfileData) -> None:
     """The LLM is asked to always write ``accepted: true`` (it has no way to
     judge usefulness) — the real accept/reject decision is made here, in
@@ -198,6 +233,7 @@ class StyleProfilerAgent(BaseServiceAgent):
         had_transcript: bool,
         facts: ChannelFacts | None = None,
         thumbnail_traits: dict[str, Any] | None = None,
+        channel_grammar: dict[str, Any] | None = None,
     ) -> StyleProfileData:
         fiches = [
             {"role": v.role.value, "views": v.views, "outlier_score": v.outlier_score, **v.analysis}
@@ -212,6 +248,7 @@ class StyleProfilerAgent(BaseServiceAgent):
             thumbnail_traits_json=json.dumps(thumbnail_traits or {}, ensure_ascii=False),
         )
         data = self.complete_json(prompt, TypeAdapter(StyleProfileData))
+        _apply_channel_grammar(data, channel_grammar)
         _enforce_accepted_invariant(data)
         data.meta.setdefault("versao_do_schema", 1)
         data.meta["videos_analisados"] = len(videos)

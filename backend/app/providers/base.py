@@ -144,12 +144,28 @@ class STTRequest:
     audio_path: str
     output_path: str = ""  # desired .srt path
     max_chars_per_line: int = 10
+    # D5/Etapa 3: word-level timestamps (for allocating narration to video
+    # scenes) and a priming prompt (e.g. known names/jargon). Both default
+    # to the prior behavior (no words requested, no prompt).
+    word_timestamps: bool = False
+    initial_prompt: str = ""
+    vad_filter: bool = True
+
+
+@dataclass
+class Word:
+    text: str
+    start: float
+    end: float
 
 
 @dataclass
 class STTResponse:
     srt_path: str
     usage: Usage = field(default_factory=Usage)
+    # Populated only when the request set word_timestamps=True and the
+    # adapter supports it (WhisperSTT does); empty otherwise.
+    words: list[Word] = field(default_factory=list)
 
 
 @dataclass

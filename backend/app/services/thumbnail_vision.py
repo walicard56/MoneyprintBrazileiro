@@ -52,7 +52,11 @@ class ThumbnailDescriptors(BaseModel):
     composition: str = ""
 
 
-def _pick_vision_spec(router: ProviderRouter) -> ProviderSpec | None:
+def pick_vision_spec(router: ProviderRouter) -> ProviderSpec | None:
+    """The first configured LLM provider whose adapter actually forwards
+    ``LLMRequest.images`` (D8) — shared with ``engine/video_lab/vision.py``,
+    which needs the exact same "is there a vision-capable provider at all"
+    check for per-scene analysis."""
     for spec in router.specs(Capability.LLM):
         cls = get_provider_class(Capability.LLM, spec.provider)
         if cls is not None and getattr(cls, "supports_vision", False):
@@ -84,7 +88,7 @@ def analyze_thumbnails(
     analyzed. Never raises — any failure for one video (download, parsing,
     provider error) just skips that video."""
     router = ProviderRouter(db)
-    vision_spec = _pick_vision_spec(router)
+    vision_spec = pick_vision_spec(router)
     if vision_spec is None:
         logs.log(
             db,

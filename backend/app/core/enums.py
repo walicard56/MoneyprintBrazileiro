@@ -228,3 +228,19 @@ class DirectionStatus(str, Enum):
     NEW = "new"
     USED = "used"
     DISMISSED = "dismissed"
+
+
+class LabRunStatus(str, Enum):
+    """Lifecycle of a Laboratório de vídeo analysis run (Etapa 3)."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class LabSource(str, Enum):
+    """Where a lab run's media came from."""
+
+    UPLOAD = "upload"
+    LINK = "link"

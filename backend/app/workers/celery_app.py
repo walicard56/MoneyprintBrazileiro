@@ -35,6 +35,10 @@ celery_app.conf.update(
             "task": "schedule.capture_reference_video_snapshots",
             "schedule": 6 * 60 * 60.0,  # checkpoints are hours/days apart; checking every 6h is plenty
         },
+        "purge-expired-lab-runs": {
+            "task": "lab.purge_expired",
+            "schedule": 60 * 60.0,  # retention is in days; hourly is plenty
+        },
     },
 )
 

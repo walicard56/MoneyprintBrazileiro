@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from app.core.enums import Status
 from app.core.logging import get_logger
-from app.db.models import ReferenceSource, Video
+from app.db.models import ReferenceSource, Video, VideoLabRun
 from app.db.session import SessionLocal
 from app.orchestrator.engine import step
 from app.services.reference_ingest import ingest_reference
+from app.services.video_lab_run import run_lab_analysis
 from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
@@ -54,5 +55,17 @@ def run_reference_ingest(self, source_id: str) -> str:  # noqa: ANN001
         ingest_reference(db, source_id)
         source = db.get(ReferenceSource, source_id)
         return source.status.value if source is not None else "not_found"
+    finally:
+        db.close()
+
+
+@celery_app.task(name="lab.run_analysis", bind=True, max_retries=0)
+def run_lab_analysis_task(self, run_id: str) -> str:  # noqa: ANN001
+    """Run one Laboratório de vídeo analysis to completion (Etapa 3)."""
+    db = SessionLocal()
+    try:
+        run_lab_analysis(db, run_id)
+        run = db.get(VideoLabRun, run_id)
+        return run.status.value if run is not None else "not_found"
     finally:
         db.close()

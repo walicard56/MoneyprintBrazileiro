@@ -10,6 +10,7 @@ from app.api.routers import (
     agents,
     characters,
     health,
+    lab,
     projects,
     prompts,
     providers,
@@ -31,4 +32,5 @@ api_router.include_router(prompts.router)
 api_router.include_router(templates.router)
 api_router.include_router(references.router)
 api_router.include_router(styles.router)
+api_router.include_router(lab.router)
 api_router.include_router(admin.router)

@@ -75,3 +75,36 @@ def start_reference_ingest(source_id: str) -> str:
     thread = threading.Thread(target=_run_reference_ingest_thread, args=(source_id,), daemon=True)
     thread.start()
     return "thread"
+
+
+def _run_lab_analysis_thread(run_id: str) -> None:
+    from app.services.video_lab_run import run_lab_analysis
+
+    db = SessionLocal()
+    try:
+        run_lab_analysis(db, run_id)
+    except Exception:  # noqa: BLE001 - failures are recorded on the run
+        logger.exception("Background lab analysis failed for run %s", run_id)
+    finally:
+        db.close()
+
+
+def start_lab_run(run_id: str) -> str:
+    """Kick off a Laboratório de vídeo analysis (Etapa 3). Returns the
+    dispatch mode. One run at a time per worker (D9) is handled by the
+    thread/celery queue itself, not here."""
+    mode = settings.execution_mode
+
+    if mode == "celery":
+        from app.orchestrator.tasks import run_lab_analysis_task
+
+        run_lab_analysis_task.delay(run_id)
+        return "celery"
+
+    if mode == "sync":
+        _run_lab_analysis_thread(run_id)
+        return "sync"
+
+    thread = threading.Thread(target=_run_lab_analysis_thread, args=(run_id,), daemon=True)
+    thread.start()
+    return "thread"
