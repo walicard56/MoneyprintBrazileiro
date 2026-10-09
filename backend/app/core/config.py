@@ -87,6 +87,17 @@ class Settings(BaseSettings):
     # Hard cap on auto-recovery attempts for a single failing request, to avoid infinite loops.
     max_recovery_attempts: int = 5
 
+    # --- Reference learning (channel/video style ingestion) ---
+    # Max uploads fetched per channel reference before stopping.
+    reference_max_videos: int = 200
+    # How many representative videos get a full per-video analysis (Phase 4).
+    reference_deep_count: int = 5
+    # Unofficial YouTube caption scraping is off by default: not an official API,
+    # may break, and may violate YouTube's terms. The user opts in explicitly.
+    enable_unofficial_transcripts: bool = False
+    # Reference transcripts are deleted right after analysis unless this is set.
+    keep_transcripts: bool = False
+
     @property
     def broker_url(self) -> str:
         return self.celery_broker_url or self.redis_url

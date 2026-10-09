@@ -29,13 +29,19 @@ from app.core.enums import (
     Capability,
     CircuitState,
     ConfigHistorySource,
+    DirectionStatus,
     KeyStatus,
     LogLevel,
     Platform,
+    ProfileStatus,
     ProviderStatus,
+    ReferenceKind,
+    ReferenceStatus,
+    ReferenceVideoRole,
     RunMode,
     Stage,
     Status,
+    TranscriptStatus,
 )
 from app.db.base import Base, TimestampMixin, UUIDMixin
 
@@ -508,3 +514,129 @@ class Metric(UUIDMixin, Base):
     comments: Mapped[int] = mapped_column(Integer, default=0)
     shares: Mapped[int] = mapped_column(Integer, default=0)
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class ReferenceSource(UUIDMixin, TimestampMixin, Base):
+    """A learned reference URL (one video, or a whole channel) and its ingestion state.
+
+    May exist without a ``project_id`` (a reference can be learned before a
+    channel exists); thumbnails are stored as hotlink URLs, never downloaded.
+    """
+
+    __tablename__ = "reference_sources"
+
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    url: Mapped[str] = mapped_column(String(1000), default="")
+    kind: Mapped[ReferenceKind] = mapped_column(SAEnum(ReferenceKind), index=True)
+    platform: Mapped[str] = mapped_column(String(50), default="youtube")
+    external_id: Mapped[str] = mapped_column(String(200), default="", index=True)
+    title: Mapped[str] = mapped_column(String(300), default="")
+    owner_title: Mapped[str] = mapped_column(String(300), default="")
+    status: Mapped[ReferenceStatus] = mapped_column(
+        SAEnum(ReferenceStatus), default=ReferenceStatus.PENDING, index=True
+    )
+    stage: Mapped[str] = mapped_column(String(100), default="")
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    # n_videos, median_views, subscriber_count, date window, etc.
+    stats: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    options: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    videos: Mapped[list["ReferenceVideo"]] = relationship(
+        back_populates="source", cascade="all, delete-orphan"
+    )
+
+
+class ReferenceVideo(UUIDMixin, TimestampMixin, Base):
+    """One video belonging to a reference source, with its derived analysis.
+
+    Only public metadata and derived analysis are stored — never downloaded
+    media. ``analysis`` holds the per-video abstract fiche produced by the
+    reference analyst agent (Phase 4); ``transcript_status`` tracks whether a
+    transcript was ever attached and whether it has since been deleted.
+    """
+
+    __tablename__ = "reference_videos"
+    __table_args__ = (
+        UniqueConstraint("source_id", "external_id", name="uq_reference_video_source_external"),
+    )
+
+    source_id: Mapped[str] = mapped_column(
+        ForeignKey("reference_sources.id", ondelete="CASCADE"), index=True
+    )
+    external_id: Mapped[str] = mapped_column(String(200), index=True)
+    title: Mapped[str] = mapped_column(String(300), default="")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_s: Mapped[int] = mapped_column(Integer, default=0)
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    likes: Mapped[int] = mapped_column(Integer, default=0)
+    comments: Mapped[int] = mapped_column(Integer, default=0)
+    thumbnail_url: Mapped[str] = mapped_column(String(500), default="")
+    # views / channel median; null until the source's stats have been computed.
+    outlier_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    views_per_day: Mapped[float | None] = mapped_column(Float, nullable=True)
+    role: Mapped[ReferenceVideoRole] = mapped_column(
+        SAEnum(ReferenceVideoRole), default=ReferenceVideoRole.NONE, index=True
+    )
+    # The per-video abstract fiche (structure, hook, pacing, ...) from Phase 4.
+    analysis: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    transcript_status: Mapped[TranscriptStatus] = mapped_column(
+        SAEnum(TranscriptStatus), default=TranscriptStatus.NONE
+    )
+
+    source: Mapped["ReferenceSource"] = relationship(back_populates="videos")
+
+
+class StyleProfile(UUIDMixin, TimestampMixin, Base):
+    """A versioned, immutable style profile learned for a channel (``Project``).
+
+    Changing the style creates a new version rather than mutating this row;
+    each ``Video`` pins the profile id it was created with, so profile edits
+    never change videos already made. The channel's currently-active profile
+    id lives in ``Project.config["active_style_profile_id"]``.
+    """
+
+    __tablename__ = "style_profiles"
+    __table_args__ = (
+        UniqueConstraint("project_id", "version", name="uq_style_profile_project_version"),
+    )
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[ProfileStatus] = mapped_column(
+        SAEnum(ProfileStatus), default=ProfileStatus.DRAFT, index=True
+    )
+    # StyleProfileData shape (schemas.reference), per-item value/why/confidence/accepted.
+    profile: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    source_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class EditorialDirection(UUIDMixin, TimestampMixin, Base):
+    """A generated subject + angle suggestion with its opportunity evidence.
+
+    Never a rewrite of a source video — ``evidence`` records why the
+    direction looks promising (e.g. views vs. the channel's median) without
+    reproducing the source's content.
+    """
+
+    __tablename__ = "editorial_directions"
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    source_id: Mapped[str | None] = mapped_column(
+        ForeignKey("reference_sources.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(300), default="")
+    why: Mapped[str] = mapped_column(Text, default="")
+    approach: Mapped[str] = mapped_column(Text, default="")
+    # video_external_id, views, multiplier, url.
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[DirectionStatus] = mapped_column(
+        SAEnum(DirectionStatus), default=DirectionStatus.NEW, index=True
+    )

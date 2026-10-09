@@ -35,6 +35,8 @@ class AgentType(str, Enum):
     MUSIC = "music"
     EDITOR = "editor"
     QC = "qc"
+    REFERENCE_ANALYST = "reference_analyst"
+    STYLE_PROFILER = "style_profiler"
 
 
 class Stage(str, Enum):
@@ -175,3 +177,54 @@ class KeyStrategy(str, Enum):
     HEALTHIEST = "healthiest"
     FAILOVER = "failover"
     WEIGHTED = "weighted"
+
+
+class ReferenceKind(str, Enum):
+    """What a learned reference URL points at."""
+
+    VIDEO = "video"
+    CHANNEL = "channel"
+
+
+class ReferenceStatus(str, Enum):
+    """Lifecycle of a reference source's background ingestion."""
+
+    PENDING = "pending"
+    FETCHING = "fetching"
+    ANALYZING = "analyzing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class ReferenceVideoRole(str, Enum):
+    """Why a reference video was selected for deeper analysis."""
+
+    TOP = "top"
+    BOTTOM = "bottom"
+    REPRESENTATIVE = "representative"
+    NONE = "none"
+
+
+class TranscriptStatus(str, Enum):
+    """Whether/how a reference video's transcript was obtained and retained."""
+
+    NONE = "none"
+    MANUAL = "manual"
+    FETCHED = "fetched"
+    DELETED = "deleted"
+
+
+class ProfileStatus(str, Enum):
+    """Lifecycle of a versioned style profile."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class DirectionStatus(str, Enum):
+    """Lifecycle of an editorial direction suggestion."""
+
+    NEW = "new"
+    USED = "used"
+    DISMISSED = "dismissed"
