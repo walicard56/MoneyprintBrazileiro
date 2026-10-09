@@ -59,10 +59,32 @@ async function postForm<T>(path: string, body: FormData): Promise<T> {
   return (await res.json()) as T;
 }
 
+// POST that expects a binary response (e.g. /tts/preview's audio bytes) —
+// everything else here expects JSON, so this can't share `request`.
+async function postBlob(path: string, body: unknown): Promise<Blob> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const data = await res.json();
+      if (data?.detail) detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
   del: (path: string) => request<void>("DELETE", path),
   postForm,
+  postBlob,
 };

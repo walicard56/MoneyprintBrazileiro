@@ -16,6 +16,7 @@ class Capability(str, Enum):
     MUSIC = "music"
     SEARCH = "search"
     PUBLISH = "publish"
+    MEDIA = "media"  # stock photo/video search (Etapa 5, item 3)
 
 
 class AgentType(str, Enum):

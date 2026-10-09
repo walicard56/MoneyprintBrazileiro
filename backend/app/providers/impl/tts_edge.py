@@ -17,9 +17,13 @@ from app.providers.base import (
     TTSRequest,
     TTSResponse,
     Usage,
+    VoiceInfo,
 )
 from app.providers.registry import register
 
+# Fallback only, for the param_schema's UI hint and for synthesize()'s own
+# default when neither the request nor the config names a voice — the real
+# catalog (Etapa 5) comes from list_voices(), not this list.
 _VOICES = [
     "en-US-AriaNeural",
     "en-US-GuyNeural",
@@ -41,6 +45,28 @@ DEFAULT_VOICE = "en-US-AriaNeural"
 )
 class EdgeTTSProvider(TTSProvider):
     provider_key = "edge"
+
+    def list_voices(self) -> list[VoiceInfo] | None:
+        try:
+            import edge_tts  # type: ignore
+        except ImportError:
+            return None
+        try:
+            raw = asyncio.run(edge_tts.list_voices())
+        except Exception:  # noqa: BLE001 - voice listing is always best-effort
+            return None
+        return [
+            VoiceInfo(
+                id=str(v.get("ShortName", "")),
+                name=str(v.get("FriendlyName") or v.get("ShortName", "")),
+                provider=self.provider_key,
+                language=str(v.get("Locale", "")),
+                gender=str(v.get("Gender", "")),
+                free=True,
+            )
+            for v in raw
+            if v.get("ShortName")
+        ]
 
     def synthesize(self, request: TTSRequest) -> TTSResponse:
         try:

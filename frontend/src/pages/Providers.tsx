@@ -36,6 +36,7 @@ const CAPS: { key: Capability; label: string }[] = [
   { key: "video", label: "Video" },
   { key: "search", label: "Search" },
   { key: "music", label: "Music" },
+  { key: "media", label: "Media search" },
 ];
 
 export default function Providers() {
@@ -437,7 +438,7 @@ function CustomProviderForm({ defaultCapability }: { defaultCapability: Capabili
             value={form.capability}
             onChange={(e) => setForm({ ...form, capability: e.target.value as Capability, provider: "" })}
           >
-            {["llm", "image", "video", "tts", "stt", "music", "search", "publish"].map((c) => (
+            {["llm", "image", "video", "tts", "stt", "music", "search", "publish", "media"].map((c) => (
               <option key={c} value={c} className="bg-panel">{c}</option>
             ))}
           </select>

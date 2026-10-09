@@ -6,7 +6,8 @@ export type Capability =
   | "stt"
   | "music"
   | "search"
-  | "publish";
+  | "publish"
+  | "media";
 
 export type Status =
   | "pending"
@@ -405,6 +406,32 @@ export interface EditorialDirection {
   status: DirectionStatus;
   created_at: string;
   updated_at: string;
+}
+
+// --- Vozes e mídia (Etapa 5) ---
+
+export interface VoiceInfo {
+  id: string;
+  name: string;
+  provider: string;
+  language: string;
+  gender: string;
+  free: boolean;
+}
+
+export interface MediaItem {
+  id: string;
+  kind: string;
+  thumbnail_url: string;
+  download_url: string;
+  width: number;
+  height: number;
+  duration_s: number;
+  license: string;
+  author: string;
+  source_url: string;
+  provider: string;
+  already_used: boolean;
 }
 
 // --- Padrões de produção do canal (Etapa 4, item 4.4) ---

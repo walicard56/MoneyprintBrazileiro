@@ -801,3 +801,20 @@ class ChannelGrammar(UUIDMixin, TimestampMixin, Base):
     )
     grammar: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     videos_analyzed: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class MediaUsage(UUIDMixin, TimestampMixin, Base):
+    """One stock media item (photo/video) used in a video — Etapa 5, item
+    3's dedup rule reads this to never offer the same (provider, media_id)
+    again within the same video, or within a channel's last N videos."""
+
+    __tablename__ = "media_usage"
+
+    video_id: Mapped[str] = mapped_column(
+        ForeignKey("videos.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(100))
+    media_id: Mapped[str] = mapped_column(String(200))

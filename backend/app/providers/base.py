@@ -140,6 +140,18 @@ class TTSResponse:
 
 
 @dataclass
+class VoiceInfo:
+    """A voice offered by a TTS provider (Etapa 5, item 1/2)."""
+
+    id: str
+    name: str
+    provider: str
+    language: str = ""
+    gender: str = ""
+    free: bool = True
+
+
+@dataclass
 class STTRequest:
     audio_path: str
     output_path: str = ""  # desired .srt path
@@ -246,6 +258,36 @@ class SearchResponse:
 
 
 @dataclass
+class MediaRequest:
+    """A stock media search (Etapa 5, item 3)."""
+
+    query: str
+    kind: str = "any"  # "photo" | "video" | "any"
+    per_page: int = 10
+    page: int = 1
+
+
+@dataclass
+class MediaItem:
+    id: str
+    kind: str  # "photo" | "video"
+    thumbnail_url: str
+    download_url: str
+    width: int = 0
+    height: int = 0
+    duration_s: float = 0.0
+    license: str = ""
+    author: str = ""
+    source_url: str = ""
+
+
+@dataclass
+class MediaResponse:
+    items: list[MediaItem] = field(default_factory=list)
+    usage: Usage = field(default_factory=Usage)
+
+
+@dataclass
 class PublishRequest:
     video_path: str
     platform: str
@@ -337,6 +379,18 @@ class TTSProvider(BaseProvider):
     @abstractmethod
     def synthesize(self, request: TTSRequest) -> TTSResponse: ...
 
+    def list_voices(self) -> list["VoiceInfo"] | None:
+        """Returns this provider's available voices, or ``None`` if it
+        doesn't support listing them (as opposed to an empty list, which
+        means "supports it, found nothing"). Override where cheap to do so."""
+        return None
+
+    def account_balance(self) -> str | None:
+        """A human-readable remaining balance/credits string, or ``None``
+        if the provider doesn't expose one — never fabricated (Etapa 5,
+        item 2: show only what the API itself reports)."""
+        return None
+
 
 class STTProvider(BaseProvider):
     capability = Capability.STT
@@ -357,3 +411,14 @@ class SearchProvider(BaseProvider):
 
     @abstractmethod
     def fetch(self, request: SearchRequest) -> SearchResponse: ...
+
+
+class MediaSearchProvider(BaseProvider):
+    """Stock photo/video search (Etapa 5, item 3) — distinct from
+    ``ImageProvider``/``VideoProvider``-shaped generation: this searches an
+    existing library rather than generating anything new."""
+
+    capability = Capability.MEDIA
+
+    @abstractmethod
+    def search(self, request: MediaRequest) -> MediaResponse: ...

@@ -127,6 +127,11 @@ class Settings(BaseSettings):
     variation_lookback: int = 5
     variation_similarity_threshold: float = 0.6
 
+    # --- Media dedup (Etapa 5, item 3) ---
+    # A stock photo/video, once used, is never offered again within the
+    # same video, nor within this many of the channel's most recent videos.
+    media_dedup_lookback: int = 5
+
     @property
     def broker_url(self) -> str:
         return self.celery_broker_url or self.redis_url

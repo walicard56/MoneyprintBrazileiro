@@ -11,12 +11,14 @@ from app.api.routers import (
     characters,
     health,
     lab,
+    media,
     projects,
     prompts,
     providers,
     references,
     styles,
     templates,
+    tts,
     videos,
 )
 
@@ -33,4 +35,6 @@ api_router.include_router(templates.router)
 api_router.include_router(references.router)
 api_router.include_router(styles.router)
 api_router.include_router(lab.router)
+api_router.include_router(media.router)
+api_router.include_router(tts.router)
 api_router.include_router(admin.router)
