@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.db
+*.db.*
+.venv/
+venv/
+
+# Secrets / env
+.env
+*.env.local
+
+# Media output
+media/
+
+# Node / frontend
+node_modules/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

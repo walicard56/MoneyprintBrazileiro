@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-night font-sans text-slate-200 antialiased;
+    /* Deep navy base + layered aurora glows (fixed so it stays behind scroll) */
+    background-color: #070b16;
+    background-image:
+      radial-gradient(60rem 32rem at 50% -8rem, rgba(37, 99, 235, 0.16), transparent 70%),
+      radial-gradient(48rem 28rem at 92% -2rem, rgba(139, 92, 246, 0.12), transparent 70%),
+      radial-gradient(40rem 24rem at 4% 8rem, rgba(16, 185, 129, 0.06), transparent 70%);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+  }
+
+  /* Faint constellation / node texture behind everything */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: radial-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1.4px);
+    background-size: 44px 44px;
+    -webkit-mask-image: radial-gradient(70rem 50rem at 50% 0%, #000 10%, transparent 75%);
+    mask-image: radial-gradient(70rem 50rem at 50% 0%, #000 10%, transparent 75%);
+    opacity: 0.5;
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Thin, dark scrollbars to match the shell */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1e293b transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #1e293b;
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #334155;
+    background-clip: padding-box;
+  }
+
+  ::selection {
+    background: rgba(59, 130, 246, 0.35);
+    color: #fff;
+  }
+}
+
+@layer components {
+  /* Gradient text — the Free-LLM blue→violet signature */
+  .gradient-text {
+    @apply bg-gradient-to-r from-brand-400 via-brand-500 to-violet-500 bg-clip-text text-transparent;
+  }
+  .gradient-text-green {
+    @apply bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent;
+  }
+
+  /* Card surface */
+  .card-surface {
+    @apply rounded-2xl border border-white/10 bg-panel/80 shadow-card backdrop-blur-sm;
+  }
+  /* Interactive card — lifts + blue edge glow on hover */
+  .card-interactive {
+    @apply card-surface transition duration-200 hover:-translate-y-0.5 hover:border-brand-500/60 hover:shadow-glow;
+  }
+  /* Featured card — persistent accent edge */
+  .card-featured {
+    @apply rounded-2xl border border-brand-500/50 bg-panel/90 shadow-glow backdrop-blur-sm;
+  }
+
+  /* Spec box — the "Top Model / Free Limits" inset panel */
+  .spec-box {
+    @apply rounded-xl border border-white/10 bg-inset/80 p-3.5;
+  }
+  .spec-row {
+    @apply flex items-center justify-between gap-3 py-1.5;
+  }
+  .spec-key {
+    @apply font-mono text-[11px] uppercase tracking-wide text-slate-500;
+  }
+  .spec-val {
+    @apply font-mono text-xs font-semibold text-slate-100;
+  }
+
+  /* Pill tag */
+  .tag {
+    @apply inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-slate-300;
+  }
+
+  /* Sticky translucent nav / top bar */
+  .glass {
+    @apply border-white/10 bg-night/70 backdrop-blur-xl;
+  }
+
+  /* Subtle hairline divider */
+  .hairline {
+    @apply border-white/10;
+  }
+}

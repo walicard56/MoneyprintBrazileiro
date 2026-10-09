@@ -1,0 +1,44 @@
+"""Celery tasks that drive the pipeline one stage at a time (spec req 14)."""
+
+from __future__ import annotations
+
+from app.core.enums import Status
+from app.core.logging import get_logger
+from app.db.models import Video
+from app.db.session import SessionLocal
+from app.orchestrator.engine import step
+from app.workers.celery_app import celery_app
+
+logger = get_logger(__name__)
+
+
+@celery_app.task(name="pipeline.run_next_stage", bind=True, max_retries=0)
+def run_next_stage(self, video_id: str) -> str:  # noqa: ANN001
+    """Run the next pending stage for a video, then re-enqueue if more remain.
+
+    Running one stage per task keeps the queue responsive, lets stages retry
+    independently, and makes progress observable in the dashboard.
+    """
+    db = SessionLocal()
+    try:
+        video = db.get(Video, video_id)
+        if video is None:
+            return "not_found"
+        if video.status in {Status.COMPLETED, Status.FAILED, Status.WAITING_APPROVAL}:
+            return video.status.value
+
+        try:
+            stage = step(db, video)
+        except Exception as exc:  # noqa: BLE001 - already recorded by run_stage
+            logger.error("Stage failed for video %s: %s", video_id, exc)
+            return "failed"
+
+        db.refresh(video)
+        if (
+            stage is not None
+            and video.status not in {Status.WAITING_APPROVAL, Status.FAILED, Status.COMPLETED}
+        ):
+            run_next_stage.delay(video_id)
+        return video.status.value
+    finally:
+        db.close()

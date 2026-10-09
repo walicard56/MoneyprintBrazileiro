@@ -1,0 +1,88 @@
+# Local development stack for the MoneyPrint platform.
+# Single-user, self-hosted. Postgres is used here so dev matches prod; the app
+# also runs on SQLite without any container (see backend/README.md).
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: moneyprint
+      POSTGRES_PASSWORD: moneyprint
+      POSTGRES_DB: moneyprint
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moneyprint"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    environment:
+      MP_DATABASE_URL: postgresql+psycopg://moneyprint:moneyprint@db:5432/moneyprint
+      MP_REDIS_URL: redis://redis:6379/0
+      MP_SECRET_ENCRYPTION_KEY: ${MP_SECRET_ENCRYPTION_KEY:-change-me-in-production}
+      MP_MEDIA_ROOT: /data/media
+      MP_EXECUTION_MODE: celery
+      MP_CORS_ORIGINS: '["http://localhost:5173","http://127.0.0.1:5173"]'
+    volumes:
+      - media_data:/data/media
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Run migrations then serve.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  worker:
+    build: ./backend
+    environment:
+      MP_DATABASE_URL: postgresql+psycopg://moneyprint:moneyprint@db:5432/moneyprint
+      MP_REDIS_URL: redis://redis:6379/0
+      MP_SECRET_ENCRYPTION_KEY: ${MP_SECRET_ENCRYPTION_KEY:-change-me-in-production}
+      MP_MEDIA_ROOT: /data/media
+      MP_EXECUTION_MODE: celery
+    volumes:
+      - media_data:/data/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
+
+  beat:
+    build: ./backend
+    environment:
+      MP_DATABASE_URL: postgresql+psycopg://moneyprint:moneyprint@db:5432/moneyprint
+      MP_REDIS_URL: redis://redis:6379/0
+      MP_SECRET_ENCRYPTION_KEY: ${MP_SECRET_ENCRYPTION_KEY:-change-me-in-production}
+      MP_MEDIA_ROOT: /data/media
+    volumes:
+      - media_data:/data/media
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app.celery_app beat --loglevel=info
+
+volumes:
+  db_data:
+  media_data:
