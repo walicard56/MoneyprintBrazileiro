@@ -17,6 +17,12 @@ dependencies = [
     "httpx==0.28.1",
     "python-multipart==0.0.20",
     "tenacity==9.0.0",
+    # IANA tz database for zoneinfo — needed on Windows, where the OS doesn't
+    # ship one. Was already present transitively via celery/kombu; made
+    # explicit because the YouTube search provider now depends on it directly
+    # (quota resets at midnight Pacific Time) and transitive deps can be
+    # dropped without notice.
+    "tzdata==2026.5",
 ]
 
 [project.optional-dependencies]

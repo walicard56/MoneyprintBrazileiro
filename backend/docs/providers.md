@@ -159,13 +159,28 @@ new base URL/model.
 
 **Not OpenAI-compatible**: add a file under `providers/impl/`, subclass the
 right ABC from `base.py` (`LLMProvider`/`ImageProvider`/`TTSProvider`/
-`STTProvider`/`PublishProvider`), implement the abstract method
-(`generate`/`synthesize`/`transcribe`/`publish`), and decorate the class with
+`STTProvider`/`PublishProvider`/`SearchProvider`), implement the abstract
+method (`generate`/`synthesize`/`transcribe`/`publish`/`fetch`), and
+decorate the class with
 `@register(display_name=..., default_endpoint=..., default_model=...)`.
 Discovery is automatic (`registry.discover()` walks every module under
 `impl/`) — nothing else needs to change. Optionally override
 `health_check()` and `list_models()` for a real connectivity probe and model
 discovery instead of the defaults (always-reachable, discovery unsupported).
+
+## SEARCH capability
+
+Added for the "Canais" reference-learning feature (`docs/PROMPT_CANAIS.md`).
+`SearchProvider.fetch(SearchRequest) -> SearchResponse` takes an `op`
+(`"resolve"`, `"video"`, `"channel"`, `"channel_videos"`) rather than a
+single verb like the other capabilities, since looking up a reference by URL
+genuinely needs several different calls against the same backing API.
+
+`providers/impl/search_youtube.py` (`provider_key="youtube_data_api"`) is the
+first adapter: official YouTube Data API v3 only, no scraping or media
+download. See `backend/docs/youtube_reference_notes.md` for its quota
+strategy and the official API's limits (no third-party captions, daily quota
+resets at midnight Pacific Time).
 
 ## Running migrations & tests
 

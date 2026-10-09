@@ -150,6 +150,66 @@ class STTResponse:
 
 
 @dataclass
+class SearchRequest:
+    """A request against the SEARCH capability (reference learning, Phase 2+).
+
+    ``op`` selects what to do:
+      - "resolve": ``url`` -> a :class:`ResolvedRef` (what kind of resource it
+        is and its canonical id), with at most one network call.
+      - "video": ``external_id`` (a video id) -> a :class:`VideoInfo`.
+      - "channel": ``external_id`` (a channel id) -> a :class:`ChannelInfo`.
+      - "channel_videos": ``external_id`` (a channel id) -> up to ``limit``
+        uploaded videos (most recent first) as ``list[VideoInfo]``, paginated
+        via ``page_token``/``SearchResponse.next_page_token``.
+    """
+
+    op: str
+    url: str = ""
+    external_id: str = ""
+    limit: int = 200
+    page_token: str = ""
+
+
+@dataclass
+class ResolvedRef:
+    """What a URL resolved to: a single video, or a channel."""
+
+    kind: str  # "video" | "channel"
+    external_id: str = ""
+
+
+@dataclass
+class ChannelInfo:
+    external_id: str
+    title: str = ""
+    uploads_playlist_id: str = ""
+    subscriber_count: int = 0
+    video_count: int = 0
+    view_count: int = 0
+
+
+@dataclass
+class VideoInfo:
+    external_id: str
+    title: str = ""
+    published_at: str = ""  # ISO 8601, as returned by the API
+    duration_s: int = 0
+    views: int = 0
+    likes: int = 0
+    comments: int = 0
+    thumbnail_url: str = ""
+    channel_id: str = ""
+
+
+@dataclass
+class SearchResponse:
+    # ResolvedRef | ChannelInfo | VideoInfo | list[VideoInfo], depending on op.
+    data: Any
+    usage: Usage = field(default_factory=Usage)
+    next_page_token: str = ""
+
+
+@dataclass
 class PublishRequest:
     video_path: str
     platform: str
@@ -248,3 +308,10 @@ class PublishProvider(BaseProvider):
 
     @abstractmethod
     def publish(self, request: PublishRequest) -> PublishResponse: ...
+
+
+class SearchProvider(BaseProvider):
+    capability = Capability.SEARCH
+
+    @abstractmethod
+    def fetch(self, request: SearchRequest) -> SearchResponse: ...
