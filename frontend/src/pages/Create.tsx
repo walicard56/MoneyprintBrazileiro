@@ -55,7 +55,7 @@ export default function Create() {
     language: "Portuguese",
     structure: "curiosity",
     tone: "energetic",
-    duration: 45,
+    durationText: "45s",
     platform: "tiktok",
     aspect: "9:16",
     runMode: "auto",
@@ -98,7 +98,7 @@ export default function Create() {
       language: selectedProject ? selectedProject.language : f.language,
       structure: f.structure,
       tone: f.tone,
-      duration: f.duration,
+      duration_text: f.durationText,
       platform: f.platform,
       aspect_ratio: f.aspect,
       preset: { width: aspect.w, height: aspect.h, fps: 30 },
@@ -356,8 +356,29 @@ export default function Create() {
                 options={AI_MODELS.map((m) => ({ value: m, label: pt.create.aiModelOptions[m] }))}
               />
             </Field>
-            <Field label={`${pt.create.duration} — ${f.duration}s`}>
-              <Slider value={f.duration} onChange={(v) => set("duration", v)} min={10} max={90} suffix="s" />
+            <Field label={pt.create.duration}>
+              <Input
+                value={f.durationText}
+                onChange={(e) => set("durationText", e.target.value)}
+                placeholder={pt.create.durationPlaceholder}
+              />
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {["30s", "45s", "60s", "90s", "5 min", "10 min", "20 min", "1 hora"].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => set("durationText", v)}
+                    className={`rounded-full border px-2.5 py-1 text-xs transition ${
+                      f.durationText === v
+                        ? "border-brand-500 bg-brand-500/10 text-brand-300"
+                        : "border-white/10 text-slate-500 hover:border-white/20"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">{pt.create.durationHint}</p>
             </Field>
             <Field label={pt.create.language}>
               {selectedProject ? (
@@ -509,7 +530,7 @@ export default function Create() {
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4 md:px-8">
           <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
             <Tag>{mode}</Tag>
-            <span>{f.platform} · {f.aspect} · {f.duration}s · {f.runMode}</span>
+            <span>{f.platform} · {f.aspect} · {f.durationText} · {f.runMode}</span>
           </div>
           <div className="flex items-center gap-3">
             {generate.error && (

@@ -33,6 +33,7 @@ from app.schemas.video import (
     StageState,
 )
 from app.services.costs import estimate_remaining_cost
+from app.services.duration import parse_duration
 from app.services.narration import InvalidNarrationAudio, apply_narration
 from app.services.production_defaults import apply_production_defaults
 from app.services.publishing import create_publications
@@ -63,6 +64,7 @@ def create_video(
         raise HTTPException(status_code=404, detail="Project not found.")
 
     config = dict(payload.config)
+    _apply_duration_text(config)  # "20 min" etc -> config["duration"] in seconds (Etapa 6)
     apply_production_defaults(config, project)  # canal > perfil > globais (Etapa 4, item 4.4)
     config.setdefault("duration", project.default_duration)
     config.setdefault("platform", config.get("platform", "tiktok"))
@@ -92,6 +94,19 @@ def create_video(
     if payload.autostart:
         start_pipeline(video.id)
     return video
+
+
+def _apply_duration_text(config: dict) -> None:
+    """"20 minutos", "1h", "90s" -> config["duration"] in seconds (Etapa 6)
+    — lets the long-format wizard accept free text instead of being capped
+    at the short-form slider's 90s. Silently ignored if it doesn't parse;
+    the caller's own default (project.default_duration) still applies."""
+    text = config.pop("duration_text", None)
+    if not text or "duration" in config:
+        return
+    seconds = parse_duration(str(text))
+    if seconds is not None and seconds > 0:
+        config["duration"] = seconds
 
 
 def _pin_active_style(db: Session, project: Project, config: dict) -> None:
@@ -127,6 +142,7 @@ def create_videos_batch(
     created: list[Video] = []
     for topic in topics:
         config = dict(payload.config)
+        _apply_duration_text(config)
         apply_production_defaults(config, project)
         config.setdefault("duration", project.default_duration)
         config.setdefault("platform", config.get("platform", "tiktok"))

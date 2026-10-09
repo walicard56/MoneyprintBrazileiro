@@ -196,6 +196,8 @@ export const pt = {
       max: "Máximo",
     },
     duration: "Duração aproximada",
+    durationPlaceholder: "Ex.: 45s, 20 min, 1 hora",
+    durationHint: "Pode digitar qualquer duração — de segundos a horas.",
     language: "Língua do vídeo",
     languageLockedByChannel: "Travada pelo idioma do canal. Escolha \"Sem canal\" para um vídeo avulso.",
     backgroundMedia: "Imagens de fundo",

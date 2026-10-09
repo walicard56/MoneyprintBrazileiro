@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import os
 
+from app.agents.content import LONG_FORM_THRESHOLD_S
 from app.core.config import settings
 from app.core.enums import AgentType, LogLevel, Stage
 from app.agents.base import BaseAgent
 from app.engine.compose import RenderConfig, SceneClip, render_video
+from app.engine.render_long import LongRenderConfig, LongScene, render_long_video
+from app.engine.subtitles_ass import write_ass_from_srt
 
 
 class EditorAgent(BaseAgent):
@@ -99,6 +102,17 @@ class RenderAgent(BaseAgent):
         if not voice_path or not os.path.exists(voice_path):
             raise ValueError("Cannot render without a voiceover track.")
 
+        duration = int(video.config.get("duration") or self.ctx.project.default_duration or 45)
+        if duration >= LONG_FORM_THRESHOLD_S:
+            output_path = self._run_long(video, voice_path, duration)
+        else:
+            output_path = self._run_short(video, voice_path)
+
+        video.video_path = output_path
+        self.log(f"Rendered final video: {output_path}")
+
+    def _run_short(self, video, voice_path: str) -> str:
+        """Unchanged MoviePy path (engine/compose.py) — short videos only."""
         scenes = [
             SceneClip(image_path=s.image_path, duration=max(0.5, float(s.duration or 4)))
             for s in video.scenes
@@ -109,7 +123,6 @@ class RenderAgent(BaseAgent):
 
         output_path = os.path.join(settings.media_root, f"{video.id}.mp4")
         cfg = self._build_render_config(video.config)
-
         render_video(
             scenes,
             voice_path,
@@ -118,8 +131,61 @@ class RenderAgent(BaseAgent):
             subtitle_path=video.config.get("subtitle_path"),
             config=cfg,
         )
-        video.video_path = output_path
-        self.log(f"Rendered final video: {output_path}")
+        return output_path
+
+    def _run_long(self, video, voice_path: str, duration: int) -> str:
+        """Etapa 6: ffmpeg segment-based render (engine/render_long.py) —
+        16:9 by default for long-format, unless the channel/video config
+        says otherwise."""
+        scenes = [
+            LongScene(image_path=s.image_path, duration_s=max(0.5, float(s.duration or 4)), camera=s.camera or None)
+            for s in video.scenes
+            if s.image_path and os.path.exists(s.image_path)
+        ]
+        if not scenes:
+            raise ValueError("Cannot render: no usable scene images.")
+
+        vconfig = video.config
+        preset = vconfig.get("preset", {})
+        width = int(preset.get("width", vconfig.get("width", 1920)))
+        height = int(preset.get("height", vconfig.get("height", 1080)))
+
+        subtitle_ass_path = None
+        subtitle_path = vconfig.get("subtitle_path")
+        if vconfig.get("subtitles_enabled", True) and subtitle_path and os.path.exists(subtitle_path):
+            subtitle_ass_path = os.path.join(settings.media_root, f"{video.id}_subs.ass")
+            try:
+                write_ass_from_srt(
+                    subtitle_path, subtitle_ass_path,
+                    width=width, height=height,
+                    fontsize=int(vconfig.get("subtitle_fontsize", 48)),
+                    color=vconfig.get("subtitle_color", "#FFFFFF"),
+                    position=vconfig.get("subtitle_position", "bottom"),
+                )
+            except Exception as exc:  # noqa: BLE001 - render without burned subs on any failure
+                self.log(f"Subtitle burn-in skipped: {exc}", level=LogLevel.WARNING)
+                subtitle_ass_path = None
+
+        output_path = os.path.join(settings.media_root, f"{video.id}.mp4")
+        work_dir = os.path.join(settings.media_root, "render_segments", video.id)
+        render_cfg = LongRenderConfig(
+            width=width, height=height,
+            fps=int(preset.get("fps", vconfig.get("fps", 30))),
+            subtitle_ass_path=subtitle_ass_path,
+            music_path=vconfig.get("music_path") if vconfig.get("music_enabled", True) else None,
+            music_volume=float(vconfig.get("music_volume", 0.15)),
+            work_dir=work_dir,
+        )
+
+        def _progress(done: int, total: int) -> None:
+            cfg = dict(video.config)
+            cfg["render_progress"] = {"done": done, "total": total}
+            video.config = cfg
+            self.ctx.db.commit()
+            self.log(f"Rendering segment {done} of {total}.")
+
+        render_long_video(scenes, voice_path, output_path, config=render_cfg, progress_callback=_progress)
+        return output_path
 
     @staticmethod
     def _build_render_config(vconfig: dict) -> RenderConfig:

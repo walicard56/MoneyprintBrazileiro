@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import re
 
+from sqlalchemy import select
+
+from app.agents.content import LONG_FORM_THRESHOLD_S, WORDS_PER_MINUTE
 from app.core.enums import AgentType, Stage, Status
-from app.db.models import Character, Scene
+from app.db.models import Character, ChannelGrammar, Scene
 from app.agents.base import BaseAgent
+
+# Etapa 6, spec item 3: a long video has hundreds of scenes, far too many
+# for the LLM to time one-by-one in a single storyboard call without just
+# inventing numbers. Below this fallback, the per-scene durations the LLM
+# (or the sentence split) returns are used as-is, same as before Etapa 6.
+DEFAULT_LONG_SCENE_DURATION_S = 6.0
 
 # Only the bracket convention from docs/PROMPT_CANAIS.md ("[imagem: ...]" /
 # "[image: ...]") is stripped from a locked script's narration. The spec also
@@ -37,7 +46,14 @@ class StoryboardAgent(BaseAgent):
         if script is None or not script.content:
             raise ValueError("Cannot storyboard without a script.")
 
-        if self.ctx.video.config.get("script_locked"):
+        duration = int(self.ctx.video.config.get("duration") or self.ctx.project.default_duration or 45)
+        if duration >= LONG_FORM_THRESHOLD_S:
+            # A video this long splits into hundreds of scenes — one LLM
+            # call can't time each of them without inventing numbers, so
+            # this goes straight to a deterministic, grammar-grounded split
+            # regardless of script_locked.
+            data = self._split_long_form(script.content)
+        elif self.ctx.video.config.get("script_locked"):
             data = self._split_locked(script.content)
         else:
             prompt = self.render_prompt(script=script.content)
@@ -50,6 +66,54 @@ class StoryboardAgent(BaseAgent):
 
         self._replace_scenes(data)
         self.log(f"Created {len(data)} scenes.")
+
+    def _split_long_form(self, raw_text: str) -> list[dict]:
+        """Etapa 6, spec item 3: scene count/duration for a long video
+        comes from the channel's own grammar (``scene_duration_median_s``),
+        not the LLM — groups consecutive sentences until each group's
+        estimated spoken length reaches that target."""
+        target_s = self._grammar_scene_duration_s()
+        target_words = max(3, round(target_s / 60 * WORDS_PER_MINUTE))
+
+        sentences = [s for s in _SENTENCE_SPLIT_RE.split(raw_text.strip()) if s.strip()]
+        scenes: list[dict] = []
+        buffer: list[str] = []
+        buffer_words = 0
+        for sentence in sentences:
+            hints = [h.strip("[] ") for h in _BRACKET_RE.findall(sentence)]
+            narration = _strip_brackets(sentence)
+            if not narration:
+                continue
+            buffer.append(narration)
+            buffer_words += len(narration.split())
+            if hints:
+                scenes.append(self._flush_long_scene(buffer, buffer_words, hints))
+                buffer, buffer_words = [], 0
+            elif buffer_words >= target_words:
+                scenes.append(self._flush_long_scene(buffer, buffer_words))
+                buffer, buffer_words = [], 0
+        if buffer:
+            scenes.append(self._flush_long_scene(buffer, buffer_words))
+        return scenes or [{"narration": _strip_brackets(raw_text), "visual_description": "", "duration": target_s}]
+
+    @staticmethod
+    def _flush_long_scene(buffer: list[str], word_count: int, hints: list[str] | None = None) -> dict:
+        duration = max(2.0, word_count / WORDS_PER_MINUTE * 60)
+        return {
+            "narration": " ".join(buffer),
+            "visual_description": "; ".join(hints or []),
+            "duration": round(duration, 2),
+        }
+
+    def _grammar_scene_duration_s(self) -> float:
+        row = self.ctx.db.execute(
+            select(ChannelGrammar).where(ChannelGrammar.project_id == self.ctx.project.id)
+        ).scalar_one_or_none()
+        if row and row.grammar:
+            value = (row.grammar.get("scene_duration_median_s") or {}).get("value")
+            if value:
+                return max(2.0, float(value))
+        return DEFAULT_LONG_SCENE_DURATION_S
 
     def _split_locked(self, raw_text: str) -> list[dict]:
         """entry_mode="script": split without rewriting a single word.
