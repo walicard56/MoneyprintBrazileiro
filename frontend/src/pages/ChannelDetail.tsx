@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type {
+  Account,
   ChannelGrammar,
   DirectionStatus,
   EditorialDirection,
@@ -33,6 +34,7 @@ import { Modal, ModalHeader } from "@/components/Modal";
 import { formatAge, formatCompactViews, pt } from "@/i18n/ptBR";
 
 const IN_PROGRESS = new Set(["pending", "fetching", "analyzing"]);
+const DEEPDIVE_IN_PROGRESS = new Set(["pending", "running"]);
 
 function useProject(projectId: string) {
   return useQuery({
@@ -43,90 +45,84 @@ function useProject(projectId: string) {
 
 /* --------------------------------------------------------------- Referências */
 
-function ReferenceVideoRow({ video, sourceId }: { video: ReferenceVideo; sourceId: string }) {
-  const qc = useQueryClient();
-  const [pasting, setPasting] = useState(false);
-  const [text, setText] = useState("");
-
-  const pasteTranscript = useMutation({
-    mutationFn: () => {
-      const body = new FormData();
-      body.set("text", text);
-      return api.postForm(`/reference-videos/${video.id}/transcript`, body);
-    },
-    onSuccess: () => {
-      setPasting(false);
-      setText("");
-      qc.invalidateQueries({ queryKey: ["reference-videos", sourceId] });
-    },
-  });
-
-  const uploadFile = useMutation({
-    mutationFn: (file: File) => {
-      const body = new FormData();
-      body.set("file", file);
-      body.set("reference_video_id", video.id);
-      return api.postForm(`/references/${sourceId}/transcripts`, body);
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["reference-videos", sourceId] }),
-  });
-
+function ReferenceVideoRow({ video }: { video: ReferenceVideo }) {
+  const [expanded, setExpanded] = useState(false);
   const roleLabel = pt.references.roleLabels[video.role];
+  const deepdiveLabel = pt.references.deepdiveLabels[video.deepdive_status];
+  const hasDeepdiveResults =
+    video.deepdive_status === "ready" &&
+    (video.attention_notes.length > 0 || video.scene_breakdown.length > 0);
 
   return (
-    <div className="flex flex-wrap items-center gap-3 border-b border-white/5 py-2.5 last:border-0">
-      {video.thumbnail_url && (
-        <img src={video.thumbnail_url} alt="" className="h-10 w-16 shrink-0 rounded-md object-cover" />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm text-slate-200">{video.title}</div>
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <span>{formatCompactViews(video.views)} views</span>
-          {video.outlier_score != null && (
-            <span>· {pt.references.outlierMultiplier(video.outlier_score)}</span>
-          )}
-          {video.views_per_day != null && <span>· {pt.references.viewsPerDay(video.views_per_day)}</span>}
-          {video.published_at && <span>· {formatAge(video.published_at)}</span>}
-          {roleLabel && <Tag color={video.role === "top" ? "emerald" : video.role === "bottom" ? "amber" : "slate"}>{roleLabel}</Tag>}
-          {video.transcript_status !== "none" && <Tag color="violet">{pt.references.transcriptSaved}</Tag>}
-        </div>
-        {pasting && (
-          <div className="mt-2 flex flex-col gap-2">
-            <Textarea
-              rows={3}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Cole a transcrição aqui…"
-            />
-            <div className="flex gap-2">
-              <Button variant="ghost" onClick={() => pasteTranscript.mutate()} disabled={!text.trim()}>
-                {pt.common.save}
-              </Button>
-              <Button variant="ghost" onClick={() => setPasting(false)}>
-                {pt.common.cancel}
-              </Button>
-            </div>
+    <div className="border-b border-white/5 py-2.5 last:border-0">
+      <div className="flex flex-wrap items-center gap-3">
+        {video.thumbnail_url && (
+          <img src={video.thumbnail_url} alt="" className="h-10 w-16 shrink-0 rounded-md object-cover" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm text-slate-200">{video.title}</div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span>{formatCompactViews(video.views)} views</span>
+            {video.outlier_score != null && (
+              <span>· {pt.references.outlierMultiplier(video.outlier_score)}</span>
+            )}
+            {video.views_per_day != null && <span>· {pt.references.viewsPerDay(video.views_per_day)}</span>}
+            {video.published_at && <span>· {formatAge(video.published_at)}</span>}
+            {roleLabel && <Tag color={video.role === "top" ? "emerald" : video.role === "bottom" ? "amber" : "slate"}>{roleLabel}</Tag>}
+            {video.transcript_status === "fetched" && <Tag color="violet">{pt.references.transcriptSaved}</Tag>}
+            {deepdiveLabel && (
+              <Tag color={video.deepdive_status === "ready" ? "violet" : video.deepdive_status === "failed" ? "amber" : "brand"}>
+                {deepdiveLabel}
+              </Tag>
+            )}
           </div>
+          {video.deepdive_status === "failed" && video.deepdive_error && (
+            <p className="mt-1 text-xs text-rose-400">{video.deepdive_error}</p>
+          )}
+        </div>
+        {hasDeepdiveResults && (
+          <Button variant="ghost" onClick={() => setExpanded((v) => !v)}>
+            {expanded ? pt.common.hide : pt.references.attentionNotesTitle}
+          </Button>
         )}
       </div>
-      <div className="flex shrink-0 gap-2">
-        <Button variant="ghost" onClick={() => setPasting((v) => !v)}>
-          {pt.references.pasteTranscript}
-        </Button>
-        <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-white/10 bg-white/5 px-3.5 py-2 text-sm font-semibold text-slate-100 transition hover:border-white/20 hover:bg-white/10">
-          {pt.references.uploadTranscript}
-          <input
-            type="file"
-            accept=".srt,.txt"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) uploadFile.mutate(file);
-              e.target.value = "";
-            }}
-          />
-        </label>
-      </div>
+
+      {expanded && hasDeepdiveResults && (
+        <div className="mt-2 ml-[76px] space-y-2">
+          {video.attention_notes.length > 0 && (
+            <div>
+              <p className="text-xs text-slate-500">{pt.references.attentionNotesHint}</p>
+              <ul className="mt-1 list-inside list-disc text-sm text-slate-300">
+                {video.attention_notes.map((note, i) => (
+                  <li key={i}>{note}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {video.scene_breakdown.length > 0 && (
+            <div>
+              <h5 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {pt.references.sceneBreakdownTitle}
+              </h5>
+              <div className="flex flex-wrap gap-1.5">
+                {video.scene_breakdown.map((scene) => (
+                  <span
+                    key={scene.index}
+                    title={(scene.vision?.mood as string) || ""}
+                    className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-slate-400"
+                  >
+                    {scene.start_s.toFixed(0)}s
+                    {scene.beat_role && (
+                      <> · {pt.lab.beatLabels[scene.beat_role as keyof typeof pt.lab.beatLabels] ?? scene.beat_role}</>
+                    )}
+                    {scene.has_caption && " · CC"}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -136,6 +132,10 @@ function ReferenceCard({ source }: { source: ReferenceSource }) {
     queryKey: ["reference-videos", source.id],
     queryFn: () => api.get<ReferenceVideo[]>(`/references/${source.id}/videos`),
     enabled: source.status === "ready",
+    refetchInterval: (query) => {
+      const data = query.state.data as ReferenceVideo[] | undefined;
+      return data?.some((v) => DEEPDIVE_IN_PROGRESS.has(v.deepdive_status)) ? 3000 : false;
+    },
   });
 
   return (
@@ -177,7 +177,7 @@ function ReferenceCard({ source }: { source: ReferenceSource }) {
       {source.status === "ready" && videos.data && videos.data.length > 0 && (
         <div className="mt-4 border-t border-white/10 pt-3">
           {videos.data.map((v) => (
-            <ReferenceVideoRow key={v.id} video={v} sourceId={source.id} />
+            <ReferenceVideoRow key={v.id} video={v} />
           ))}
         </div>
       )}
@@ -864,9 +864,88 @@ function VideosTab({ projectId }: { projectId: string }) {
   );
 }
 
+/* --------------------------------------------------------------------- Contas */
+
+const PLATFORMS = ["tiktok", "youtube", "facebook", "instagram"];
+
+function AccountsTab() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["accounts"], queryFn: () => api.get<Account[]>("/accounts") });
+  const [form, setForm] = useState({ name: "", platform: "tiktok", socialIds: "" });
+
+  const create = useMutation({
+    mutationFn: () =>
+      api.post<Account>("/accounts", {
+        name: form.name,
+        platform: form.platform,
+        params: {
+          social_account_ids: form.socialIds
+            .split(",")
+            .map((s) => Number(s.trim()))
+            .filter((n) => !Number.isNaN(n)),
+        },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      setForm({ ...form, name: "", socialIds: "" });
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/accounts/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+  });
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-slate-500">{pt.accounts.hint}</p>
+      <Card>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <Field label={pt.accounts.platform}>
+            <Select
+              value={form.platform}
+              onChange={(v) => setForm({ ...form, platform: v })}
+              options={PLATFORMS.map((p) => ({ value: p, label: p }))}
+            />
+          </Field>
+          <Field label={pt.accounts.name}>
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </Field>
+          <Field label={pt.accounts.socialIds}>
+            <Input value={form.socialIds} onChange={(e) => setForm({ ...form, socialIds: e.target.value })} />
+          </Field>
+          <div className="flex items-end">
+            <Button disabled={!form.name || create.isPending} onClick={() => create.mutate()}>
+              {pt.accounts.add}
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      <div className="space-y-2">
+        {data?.map((a) => (
+          <Card key={a.id} className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-slate-100">{a.name}</span>
+              <Tag>{a.platform}</Tag>
+            </div>
+            <div className="flex items-center gap-2">
+              {a.enabled ? <StatusBadge status="completed" /> : <StatusBadge status="cancelled" />}
+              <Button variant="danger" onClick={() => remove.mutate(a.id)}>
+                {pt.accounts.delete}
+              </Button>
+            </div>
+          </Card>
+        ))}
+        {data?.length === 0 && <p className="text-sm text-slate-500">{pt.accounts.empty}</p>}
+      </div>
+    </div>
+  );
+}
+
 /* -------------------------------------------------------------------- Shell */
 
-const TABS = ["referencias", "estilo", "direcoes", "videos"] as const;
+const TABS = ["referencias", "estilo", "direcoes", "videos", "contas"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ChannelDetail() {
@@ -902,6 +981,7 @@ export default function ChannelDetail() {
       {tab === "estilo" && <StyleTab projectId={id} onGoToReferences={() => setTab("referencias")} />}
       {tab === "direcoes" && <DirectionsTab projectId={id} niche={p.niche} />}
       {tab === "videos" && <VideosTab projectId={id} />}
+      {tab === "contas" && <AccountsTab />}
     </div>
   );
 }

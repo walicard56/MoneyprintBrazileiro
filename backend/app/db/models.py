@@ -29,6 +29,7 @@ from app.core.enums import (
     Capability,
     CircuitState,
     ConfigHistorySource,
+    DeepDiveStatus,
     DirectionStatus,
     KeyStatus,
     LabRunStatus,
@@ -600,6 +601,25 @@ class ReferenceVideo(UUIDMixin, TimestampMixin, Base):
     # while the transcript is still in memory, just before it's deleted;
     # the transcript text itself is never stored here.
     originality_signature: Mapped[list[int]] = mapped_column(JSON, default=list)
+
+    # Deep-dive (auto transcript + scene/attention analysis, D2 opt-in):
+    # lifecycle of the background job, mirroring ReferenceSource's own
+    # status/stage/error fields.
+    deepdive_status: Mapped[DeepDiveStatus] = mapped_column(
+        SAEnum(DeepDiveStatus), default=DeepDiveStatus.NONE, index=True
+    )
+    deepdive_stage: Mapped[str] = mapped_column(String(50), default="")
+    deepdive_error: Mapped[str] = mapped_column(String(2000), default="")
+    # Per-scene structural data (timing, beat role, words/min, caption
+    # presence, abstract vision descriptors) from the same scene/vision
+    # pipeline the Laboratório de vídeo uses — never the extracted frames
+    # themselves, only derived descriptors (same policy as thumbnail_vision).
+    scene_breakdown: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # Deterministic, human-readable bullets derived from scene_breakdown
+    # (hook length, fastest cut, speech-rhythm peak, caption coverage) — an
+    # estimate of where attention likely concentrates, never real retention
+    # data (no official API exposes that for a video you don't own).
+    attention_notes: Mapped[list[str]] = mapped_column(JSON, default=list)
 
     source: Mapped["ReferenceSource"] = relationship(back_populates="videos")
     snapshots: Mapped[list["ReferenceVideoSnapshot"]] = relationship(

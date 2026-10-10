@@ -77,6 +77,42 @@ def start_reference_ingest(source_id: str) -> str:
     return "thread"
 
 
+def _run_reference_deepdive_thread(reference_video_id: str) -> None:
+    from app.services.reference_deepdive import run_deep_dive
+
+    db = SessionLocal()
+    try:
+        run_deep_dive(db, reference_video_id)
+    except Exception:  # noqa: BLE001 - failures are recorded on the reference video
+        logger.exception("Background reference deep-dive failed for video %s", reference_video_id)
+    finally:
+        db.close()
+
+
+def start_reference_deepdive(reference_video_id: str) -> str:
+    """Kick off the deep-dive (download, transcript, scene/attention
+    analysis) for one reference video. Returns the dispatch mode. Caller is
+    responsible for checking ``settings.enable_reference_media_download``
+    first."""
+    mode = settings.execution_mode
+
+    if mode == "celery":
+        from app.orchestrator.tasks import run_reference_deepdive
+
+        run_reference_deepdive.delay(reference_video_id)
+        return "celery"
+
+    if mode == "sync":
+        _run_reference_deepdive_thread(reference_video_id)
+        return "sync"
+
+    thread = threading.Thread(
+        target=_run_reference_deepdive_thread, args=(reference_video_id,), daemon=True
+    )
+    thread.start()
+    return "thread"
+
+
 def _run_lab_analysis_thread(run_id: str) -> None:
     from app.services.video_lab_run import run_lab_analysis
 

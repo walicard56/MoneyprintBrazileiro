@@ -46,6 +46,10 @@ lab = [
     "faster-whisper==1.1.0",
     "numpy==1.26.4",
     "pytesseract==0.3.13",
+    # Reference-video deep-dive (Canais) and the Lab's link-fetch stub, both
+    # off by default — downloading third-party media is the user's own
+    # opt-in decision (MP_ENABLE_REFERENCE_MEDIA_DOWNLOAD / MP_ENABLE_LINK_FETCH).
+    "yt-dlp==2026.8.19",
 ]
 
 [tool.ruff]

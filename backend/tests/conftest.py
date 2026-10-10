@@ -18,6 +18,11 @@ os.environ["MP_DATABASE_URL"] = f"sqlite:///{_TMP_DB}"
 os.environ["MP_SECRET_ENCRYPTION_KEY"] = "test-encryption-key"
 os.environ["MP_LOCAL_API_TOKEN"] = ""
 os.environ["MP_ENVIRONMENT"] = "test"
+# Forced off regardless of the developer's own .env: tests that want it on
+# (test_references_api.py, test_reference_deepdive.py) flip it back via
+# monkeypatch, so dispatch stays deterministic and never hits the real
+# network in the rest of the suite.
+os.environ["MP_ENABLE_REFERENCE_MEDIA_DOWNLOAD"] = "false"
 
 from fastapi.testclient import TestClient  # noqa: E402
 

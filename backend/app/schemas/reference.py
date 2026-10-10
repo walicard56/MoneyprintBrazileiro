@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.enums import (
+    DeepDiveStatus,
     DirectionStatus,
     ProfileStatus,
     ReferenceKind,
@@ -60,6 +61,11 @@ class ReferenceVideoRead(BaseModel):
     role: ReferenceVideoRole
     analysis: dict[str, Any]
     transcript_status: TranscriptStatus
+    deepdive_status: DeepDiveStatus
+    deepdive_stage: str
+    deepdive_error: str
+    scene_breakdown: list[dict[str, Any]]
+    attention_notes: list[str]
 
 
 class ReferenceSourceDetail(ReferenceSourceRead):

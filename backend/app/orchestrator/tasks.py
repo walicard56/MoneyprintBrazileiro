@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from app.core.enums import Status
 from app.core.logging import get_logger
-from app.db.models import ReferenceSource, Video, VideoLabRun
+from app.db.models import ReferenceSource, ReferenceVideo, Video, VideoLabRun
 from app.db.session import SessionLocal
 from app.orchestrator.engine import step
+from app.services.reference_deepdive import run_deep_dive
 from app.services.reference_ingest import ingest_reference
 from app.services.video_lab_run import run_lab_analysis
 from app.workers.celery_app import celery_app
@@ -55,6 +56,19 @@ def run_reference_ingest(self, source_id: str) -> str:  # noqa: ANN001
         ingest_reference(db, source_id)
         source = db.get(ReferenceSource, source_id)
         return source.status.value if source is not None else "not_found"
+    finally:
+        db.close()
+
+
+@celery_app.task(name="reference.deepdive", bind=True, max_retries=0)
+def run_reference_deepdive(self, reference_video_id: str) -> str:  # noqa: ANN001
+    """Run one reference video's deep-dive (download, transcript, scene/
+    attention analysis) to completion."""
+    db = SessionLocal()
+    try:
+        run_deep_dive(db, reference_video_id)
+        video = db.get(ReferenceVideo, reference_video_id)
+        return video.deepdive_status.value if video is not None else "not_found"
     finally:
         db.close()
 

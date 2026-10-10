@@ -2,18 +2,19 @@
 
 The official YouTube Data API cannot return another creator's captions —
 caption download requires the video owner's own authorization. So a
-transcript here only ever comes from something the user explicitly supplied:
-pasted text, or an uploaded ``.srt``/``.txt`` file (the "manual" source,
-written to disk by ``api/routers/references.py``).
+transcript here comes from one of two sources: the deep-dive pipeline
+(``services/reference_deepdive.py``), which downloads the video's audio via
+yt-dlp and transcribes it locally with the same faster-whisper adapter the
+Laboratório de vídeo uses (``status=fetched``) — opt-in, off by default
+(``MP_ENABLE_REFERENCE_MEDIA_DOWNLOAD``) — or manual paste/upload has been
+removed from the product (2026-10-09): the deep-dive is now the only path.
 
-An "stt" adapter (transcribing an uploaded audio file via the existing
-``STTProvider`` pool) and a "youtube_captions_unofficial" adapter are named
-in the product spec but are not wired to anything yet: no endpoint accepts
-an audio upload today, and the unofficial-captions path would mean scraping
-YouTube's own pages/endpoints outside the official API, which
-``docs/PROMPT_CANAIS.md`` section 8 explicitly reserves as the user's call,
-not something to auto-implement. ``unofficial_transcripts_enabled`` below
-reports the flag honestly; there is intentionally no fetch function behind it.
+A "youtube_captions_unofficial" adapter is named in the product spec but
+intentionally not wired to anything: that path means scraping YouTube's own
+pages/endpoints outside the official API, which ``docs/PROMPT_CANAIS.md``
+section 8 explicitly reserves as the user's call, not something to
+auto-implement. ``unofficial_transcripts_enabled`` below reports the flag
+honestly; there is intentionally no fetch function behind it.
 """
 
 from __future__ import annotations
@@ -31,11 +32,13 @@ def _transcript_path(reference_video_id: str) -> str:
     return os.path.join(folder, f"{reference_video_id}.txt")
 
 
-def write_transcript(video: ReferenceVideo, text: str) -> None:
-    """Store manually-supplied transcript text (paste or file upload)."""
+def write_transcript(
+    video: ReferenceVideo, text: str, *, status: TranscriptStatus = TranscriptStatus.FETCHED
+) -> None:
+    """Store transcript text obtained for a video (deep-dive STT by default)."""
     with open(_transcript_path(video.id), "w", encoding="utf-8") as fh:
         fh.write(text)
-    video.transcript_status = TranscriptStatus.MANUAL
+    video.transcript_status = status
 
 
 def read_transcript(video: ReferenceVideo) -> str | None:

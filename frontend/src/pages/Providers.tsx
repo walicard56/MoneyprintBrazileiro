@@ -2,11 +2,14 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type {
+  AgentConfig,
   AutoFixResult,
   Capability,
+  Prompt,
   Provider,
   ProviderCatalogEntry,
   ProviderPreset,
+  VoiceInfo,
 } from "@/api/types";
 import {
   Button,
@@ -16,6 +19,7 @@ import {
   Input,
   PageHeader,
   Section,
+  Select,
   SpecBox,
   Tag,
   TopPick,
@@ -26,6 +30,7 @@ import { EditProviderModal } from "@/components/providers/EditProviderModal";
 import { ModelsPanel } from "@/components/providers/ModelsPanel";
 import { KeysPanel } from "@/components/providers/KeysPanel";
 import { HistoryPanel } from "@/components/providers/HistoryPanel";
+import { pt } from "@/i18n/ptBR";
 
 const CAPS: { key: Capability; label: string }[] = [
   { key: "llm", label: "Text (LLM)" },
@@ -39,7 +44,51 @@ const CAPS: { key: Capability; label: string }[] = [
   { key: "media", label: "Media search" },
 ];
 
+type PageSection = "catalog" | "pipeline";
+
 export default function Providers() {
+  const [section, setSection] = useState<PageSection>("catalog");
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow="Connect your APIs"
+        title={<>Providers &amp; <span className="gradient-text">APIs</span></>}
+        subtitle="Pick a service, follow the guide, paste your key. Free options are marked."
+      />
+
+      {/* Page-level sections */}
+      <div className="mb-6 flex gap-1 border-b border-white/10">
+        <button
+          onClick={() => setSection("catalog")}
+          className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+            section === "catalog"
+              ? "border-brand-500 text-brand-300"
+              : "border-transparent text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          Providers
+        </button>
+        <button
+          onClick={() => setSection("pipeline")}
+          className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+            section === "pipeline"
+              ? "border-brand-500 text-brand-300"
+              : "border-transparent text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          Agents &amp; Prompts
+        </button>
+      </div>
+
+      {section === "catalog" ? <ProviderCatalog /> : <PipelineTuning />}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ Catalog tab */
+
+function ProviderCatalog() {
   const qc = useQueryClient();
   const [cap, setCap] = useState<Capability>("llm");
   const [setup, setSetup] = useState<ProviderPreset | null>(null);
@@ -62,12 +111,6 @@ export default function Providers() {
 
   return (
     <div>
-      <PageHeader
-        eyebrow="Connect your APIs"
-        title={<>Providers &amp; <span className="gradient-text">APIs</span></>}
-        subtitle="Pick a service, follow the guide, paste your key. Free options are marked."
-      />
-
       {/* Capability tabs */}
       <div className="mb-6 flex flex-wrap gap-2">
         {CAPS.map((c) => (
@@ -84,6 +127,26 @@ export default function Providers() {
           </button>
         ))}
       </div>
+
+      {/* Curated extras that don't (yet) have a one-click preset */}
+      {cap === "tts" && (
+        <div className="mb-8 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <EdgeVoiceBrowser />
+          <div className="space-y-3">
+            <PaidTtsKeyCard providerKey="elevenlabs" name="ElevenLabs" docsUrl="https://elevenlabs.io/app/settings/api-keys" />
+            <PaidTtsKeyCard providerKey="gemini_tts" name="Gemini (Google)" docsUrl="https://aistudio.google.com/apikey" />
+          </div>
+        </div>
+      )}
+      {cap === "media" && (
+        <div className="mb-8 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <MediaKeyCard providerKey="media_pexels" name="Pexels" docsUrl="https://www.pexels.com/api/" />
+          <MediaKeyCard providerKey="media_pixabay" name="Pixabay" docsUrl="https://pixabay.com/api/docs/" />
+          <KeylessMediaCard name="Wikimedia Commons" />
+          <KeylessMediaCard name="Openverse" />
+          <KeylessMediaCard name="NASA Image and Video Library" />
+        </div>
+      )}
 
       {/* Preset gallery */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -486,5 +549,398 @@ function CustomProviderForm({ defaultCapability }: { defaultCapability: Capabili
         </Button>
       </div>
     </Section>
+  );
+}
+
+/* ---------------------------------------------------- Curated TTS extras */
+
+function EdgeVoiceBrowser() {
+  const [locale, setLocale] = useState("");
+  const [playing, setPlaying] = useState<string | null>(null);
+
+  const voices = useQuery({
+    queryKey: ["tts-voices", "edge", locale],
+    queryFn: () =>
+      api.get<VoiceInfo[]>(`/tts/voices?provider=edge${locale ? `&locale=${locale}` : ""}`),
+  });
+
+  const commonLocales = ["pt-BR", "en-US", "es-ES", "fr-FR", "de-DE"];
+
+  async function listen(voice: VoiceInfo) {
+    setPlaying(voice.id);
+    try {
+      const blob = await api.postBlob("/tts/preview", { provider: "edge", voice: voice.id });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+    } finally {
+      setPlaying(null);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold text-slate-200">Microsoft Edge (grátis)</h4>
+        <Tag color="emerald">{pt.settings.configured}</Tag>
+      </div>
+      <p className="mt-1 text-xs text-slate-500">{pt.settings.voicesFreeNote}</p>
+
+      <div className="mt-3 max-w-xs">
+        <Field label={pt.settings.voicesFilterLanguage}>
+          <Select
+            value={locale}
+            onChange={setLocale}
+            options={[{ value: "", label: pt.settings.voicesAll }, ...commonLocales.map((l) => ({ value: l, label: l }))]}
+          />
+        </Field>
+      </div>
+
+      <div className="mt-3 max-h-64 space-y-1 overflow-y-auto">
+        {voices.data?.slice(0, 50).map((v) => (
+          <div key={v.id} className="flex items-center justify-between rounded-lg border border-white/5 px-3 py-1.5 text-sm">
+            <span className="text-slate-300">
+              {v.name} <span className="text-xs text-slate-500">({v.language}, {v.gender})</span>
+            </span>
+            <Button variant="ghost" onClick={() => listen(v)} disabled={playing === v.id}>
+              {playing === v.id ? "…" : pt.settings.voicesListen}
+            </Button>
+          </div>
+        ))}
+        {voices.data && voices.data.length > 50 && (
+          <p className="pt-1 text-center text-xs text-slate-500">
+            +{voices.data.length - 50} outras — filtre por idioma para ver mais específicas.
+          </p>
+        )}
+        {voices.isLoading && <p className="text-xs text-slate-500">{pt.common.loading}</p>}
+      </div>
+    </Card>
+  );
+}
+
+function PaidTtsKeyCard({
+  providerKey,
+  name,
+  docsUrl,
+}: {
+  providerKey: string;
+  name: string;
+  docsUrl: string;
+}) {
+  const qc = useQueryClient();
+  const [apiKey, setApiKey] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+
+  const providers = useQuery({
+    queryKey: ["providers", "tts"],
+    queryFn: () => api.get<Provider[]>("/providers?capability=tts"),
+  });
+  const existing = providers.data?.find((p) => p.provider === providerKey);
+
+  const balance = useQuery({
+    queryKey: ["tts-balance", providerKey],
+    queryFn: () => api.get<{ balance: string | null }>(`/tts/balance?provider=${providerKey}`),
+    enabled: !!existing,
+  });
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.post<Provider>("/providers", { name, capability: "tts", provider: providerKey, api_key: apiKey }),
+    onSuccess: async () => {
+      setApiKey("");
+      await qc.invalidateQueries({ queryKey: ["providers", "tts"] });
+      setMessage(null);
+    },
+    onError: (err: Error) => setMessage(`Falhou: ${err.message}`),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => api.del(`/providers/${existing!.id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["providers", "tts"] });
+      setMessage(null);
+    },
+  });
+
+  const test = useMutation({
+    mutationFn: () => api.get<VoiceInfo[]>(`/tts/voices?provider=${providerKey}`),
+    onSuccess: (voices) => setMessage(`OK — ${voices.length} vozes encontradas.`),
+    onError: (err: Error) => setMessage(`Falhou: ${err.message}`),
+  });
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold text-slate-200">{name}</h4>
+        {existing ? <Tag color="emerald">{pt.settings.configured}</Tag> : null}
+      </div>
+      <a href={docsUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs text-brand-300 hover:underline">
+        {pt.settings.howToGetKey}
+      </a>
+
+      {existing ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {balance.data?.balance && <span className="text-xs text-slate-400">{balance.data.balance}</span>}
+          <Button variant="ghost" onClick={() => test.mutate()} disabled={test.isPending}>
+            {test.isPending ? pt.settings.testing : "Testar"}
+          </Button>
+          <Button variant="ghost" onClick={() => remove.mutate()} disabled={remove.isPending}>
+            {pt.settings.removeKey}
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-3 flex gap-2">
+          <Input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={pt.settings.apiKeyPlaceholder}
+          />
+          <Button onClick={() => save.mutate()} disabled={!apiKey || save.isPending}>
+            {pt.settings.saveAndTest}
+          </Button>
+        </div>
+      )}
+      {message && <p className="mt-2 text-xs text-slate-400">{message}</p>}
+    </Card>
+  );
+}
+
+/* -------------------------------------------------- Curated media extras */
+
+function MediaKeyCard({ providerKey, name, docsUrl }: { providerKey: string; name: string; docsUrl: string }) {
+  const qc = useQueryClient();
+  const [apiKey, setApiKey] = useState("");
+
+  const providers = useQuery({
+    queryKey: ["providers", "media"],
+    queryFn: () => api.get<Provider[]>("/providers?capability=media"),
+  });
+  const existing = providers.data?.find((p) => p.provider === providerKey);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.post<Provider>("/providers", { name, capability: "media", provider: providerKey, api_key: apiKey }),
+    onSuccess: async () => {
+      setApiKey("");
+      await qc.invalidateQueries({ queryKey: ["providers", "media"] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => api.del(`/providers/${existing!.id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["providers", "media"] }),
+  });
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold text-slate-200">{name}</h4>
+        {existing ? <Tag color="emerald">{pt.settings.configured}</Tag> : <Tag color="slate">{pt.settings.mediaNeedsKey}</Tag>}
+      </div>
+      <a href={docsUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs text-brand-300 hover:underline">
+        {pt.settings.howToGetKey}
+      </a>
+      {existing ? (
+        <div className="mt-3">
+          <Button variant="ghost" onClick={() => remove.mutate()} disabled={remove.isPending}>
+            {pt.settings.removeKey}
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-3 flex gap-2">
+          <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={pt.settings.apiKeyPlaceholder} />
+          <Button onClick={() => save.mutate()} disabled={!apiKey || save.isPending}>
+            {pt.settings.saveAndTest}
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function KeylessMediaCard({ name }: { name: string }) {
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold text-slate-200">{name}</h4>
+        <Tag color="emerald">{pt.settings.configured}</Tag>
+      </div>
+      <p className="mt-1 text-xs text-slate-500">{pt.settings.mediaFreeNote}</p>
+    </Card>
+  );
+}
+
+/* --------------------------------------------------------- Pipeline tab */
+
+function PipelineTuning() {
+  const qc = useQueryClient();
+  const configs = useQuery({
+    queryKey: ["agent-configs"],
+    queryFn: () => api.get<AgentConfig[]>("/agents?project_id="),
+  });
+  const providers = useQuery({
+    queryKey: ["providers", "llm"],
+    queryFn: () => api.get<Provider[]>("/providers?capability=llm"),
+  });
+  const prompts = useQuery({ queryKey: ["prompts"], queryFn: () => api.get<Prompt[]>("/prompts") });
+  const seed = useMutation({
+    mutationFn: () => api.post("/admin/seed"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["agent-configs"] });
+      qc.invalidateQueries({ queryKey: ["prompts"] });
+    },
+  });
+
+  const globals = (configs.data ?? []).filter((c) => c.project_id === null);
+
+  return (
+    <div>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <p className="max-w-2xl text-sm text-slate-500">
+          Global defaults for the pipeline — which provider each agent uses, its model/temperature, and the
+          prompt templates they run. Advanced: most people never need to touch this.
+        </p>
+        <Button variant="ghost" onClick={() => seed.mutate()} disabled={seed.isPending}>
+          {seed.isPending ? "Seeding…" : "Seed defaults"}
+        </Button>
+      </div>
+
+      <h2 className="mb-3 text-sm font-semibold text-slate-200">Agent configuration</h2>
+      <div className="space-y-3">
+        {globals.map((c) => (
+          <AgentRow key={c.id} config={c} providers={providers.data ?? []} />
+        ))}
+        {globals.length === 0 && (
+          <p className="text-sm text-slate-500">No agent configs. Click “Seed defaults”.</p>
+        )}
+      </div>
+
+      <h2 className="mb-3 mt-9 text-sm font-semibold text-slate-200">Prompt manager</h2>
+      <div className="space-y-3">
+        {prompts.data?.map((p) => <PromptRow key={p.id} prompt={p} />)}
+        {prompts.data?.length === 0 && (
+          <p className="text-sm text-slate-500">No prompts. Click “Seed defaults” above.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AgentRow({ config, providers }: { config: AgentConfig; providers: Provider[] }) {
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState(config);
+  const save = useMutation({
+    mutationFn: () =>
+      api.patch(`/agents/${config.id}`, {
+        model: draft.model,
+        temperature: draft.temperature,
+        max_tokens: draft.max_tokens,
+        system_prompt: draft.system_prompt,
+        provider_config_id: draft.provider_config_id,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agent-configs"] }),
+  });
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center gap-2">
+        <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-brand-400 to-violet-500" />
+        <span className="font-mono text-sm font-semibold text-slate-100">{config.agent_type}</span>
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <label className="text-xs text-slate-400">
+          Provider
+          <select
+            className="mt-1 w-full rounded-lg border border-white/10 bg-inset/70 px-2 py-1.5 text-sm text-slate-100 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25"
+            value={draft.provider_config_id ?? ""}
+            onChange={(e) => setDraft({ ...draft, provider_config_id: e.target.value || null })}
+          >
+            <option value="">Auto (router + fallback)</option>
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-slate-400">
+          Model
+          <input
+            className="mt-1 w-full rounded-lg border border-white/10 bg-inset/70 px-2 py-1.5 text-sm text-slate-100 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25"
+            value={draft.model}
+            onChange={(e) => setDraft({ ...draft, model: e.target.value })}
+          />
+        </label>
+        <label className="text-xs text-slate-400">
+          Temperature
+          <input
+            type="number"
+            step="0.1"
+            className="mt-1 w-full rounded-lg border border-white/10 bg-inset/70 px-2 py-1.5 text-sm text-slate-100 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25"
+            value={draft.temperature}
+            onChange={(e) => setDraft({ ...draft, temperature: Number(e.target.value) })}
+          />
+        </label>
+        <label className="text-xs text-slate-400">
+          Max tokens
+          <input
+            type="number"
+            className="mt-1 w-full rounded-lg border border-white/10 bg-inset/70 px-2 py-1.5 text-sm text-slate-100 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25"
+            value={draft.max_tokens}
+            onChange={(e) => setDraft({ ...draft, max_tokens: Number(e.target.value) })}
+          />
+        </label>
+      </div>
+      <label className="mt-3 block text-xs text-slate-400">
+        System prompt
+        <textarea
+          className="mt-1 h-20 w-full rounded-lg border border-white/10 bg-inset/70 px-2 py-1.5 font-mono text-xs text-slate-100 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25"
+          value={draft.system_prompt}
+          onChange={(e) => setDraft({ ...draft, system_prompt: e.target.value })}
+        />
+      </label>
+      <div className="mt-3">
+        <Button onClick={() => save.mutate()} disabled={save.isPending}>Save</Button>
+      </div>
+    </Card>
+  );
+}
+
+function PromptRow({ prompt }: { prompt: Prompt }) {
+  const qc = useQueryClient();
+  const [content, setContent] = useState(prompt.content);
+  const [testOut, setTestOut] = useState("");
+
+  const save = useMutation({
+    mutationFn: () => api.patch(`/prompts/${prompt.id}`, { content }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["prompts"] }),
+  });
+  const test = useMutation({
+    mutationFn: () => api.post<{ provider: string; output: string }>(`/prompts/${prompt.id}/test`),
+    onSuccess: (r) => setTestOut(`${r.provider}: ${r.output}`),
+    onError: (e) => setTestOut(`Error: ${(e as Error).message}`),
+  });
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-slate-100">{prompt.name}</span>
+          <span className="font-mono text-xs text-slate-500">
+            v{prompt.version} · {prompt.agent_type ?? "general"}
+          </span>
+          {prompt.is_default && <Tag color="brand">default</Tag>}
+        </div>
+      </div>
+      <textarea
+        className="h-40 w-full rounded-lg border border-white/10 bg-inset/70 px-3 py-2 font-mono text-xs text-slate-100 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25"
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+      />
+      <div className="mt-2 flex items-center gap-2">
+        <Button onClick={() => save.mutate()} disabled={save.isPending}>Save (bumps version)</Button>
+        <Button variant="ghost" onClick={() => test.mutate()} disabled={test.isPending}>Test</Button>
+        {testOut && <span className="text-xs text-slate-400">{testOut}</span>}
+      </div>
+    </Card>
   );
 }

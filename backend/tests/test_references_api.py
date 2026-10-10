@@ -209,7 +209,58 @@ def test_delete_reference(client: TestClient) -> None:
     assert client.get(f"{API}/references/{source_id}").status_code == 404
 
 
-def test_paste_transcript_on_reference_video(client: TestClient) -> None:
+def test_deepdive_dispatched_for_top_videos_when_download_enabled(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MP_ENABLE_REFERENCE_MEDIA_DOWNLOAD on: the channel's TOP ("bombou")
+    videos get queued for the deep-dive, capped at reference_deepdive_top_n,
+    picked by highest outlier_score. ``start_reference_deepdive`` itself is
+    stubbed — this test is about the dispatch decision, not the pipeline
+    (covered by test_reference_deepdive.py)."""
+    monkeypatch.setattr(settings, "enable_reference_media_download", True)
+    monkeypatch.setattr(settings, "reference_deepdive_top_n", 1)
+    dispatched: list[str] = []
+    monkeypatch.setattr(
+        "app.orchestrator.dispatch.start_reference_deepdive",
+        lambda video_id: dispatched.append(video_id) or "sync",
+    )
+
+    _add_provider(client)
+    # Two TOP-worthy videos (both >=3x median) so the top_n=1 cap actually matters.
+    views = [1000] * 8 + [10000, 20000]
+    videos_info = [
+        VideoInfo(external_id=f"v{i}", title=f"Video {i}", published_at=_OLD, views=v)
+        for i, v in enumerate(views)
+    ]
+    _CURRENT_SCRIPT.set("resolve", ResolvedRef(kind="channel", external_id="UCtest1234567890"))
+    _CURRENT_SCRIPT.set(
+        "channel",
+        ChannelInfo(
+            external_id="UCtest1234567890",
+            title="Test Channel",
+            uploads_playlist_id="UUtest1234567890",
+            subscriber_count=5000,
+        ),
+    )
+    _CURRENT_SCRIPT.set("channel_videos", videos_info)
+
+    created = client.post(
+        f"{API}/references",
+        json={"urls": ["https://www.youtube.com/channel/UCtest1234567890"]},
+    )
+    source_id = created.json()[0]["id"]
+
+    videos = client.get(f"{API}/references/{source_id}/videos").json()
+    top_by_views = max(videos, key=lambda v: v["views"])
+    assert len(dispatched) == 1
+    assert dispatched[0] == top_by_views["id"]
+    assert top_by_views["deepdive_status"] == "pending"
+
+
+def test_deepdive_not_triggered_when_download_disabled(client: TestClient) -> None:
+    """MP_ENABLE_REFERENCE_MEDIA_DOWNLOAD is off by default — a freshly
+    ingested video must stay deepdive_status=none, never silently kick off
+    a download."""
     _add_provider(client)
     _CURRENT_SCRIPT.set("resolve", ResolvedRef(kind="video", external_id="abc12345678"))
     _CURRENT_SCRIPT.set("video", VideoInfo(external_id="abc12345678", title="T", published_at=_OLD))
@@ -218,60 +269,7 @@ def test_paste_transcript_on_reference_video(client: TestClient) -> None:
         f"{API}/references", json={"urls": ["https://www.youtube.com/watch?v=abc12345678"]}
     )
     source_id = created.json()[0]["id"]
-    video_id = client.get(f"{API}/references/{source_id}/videos").json()[0]["id"]
-
-    resp = client.post(
-        f"{API}/reference-videos/{video_id}/transcript", data={"text": "Hello world transcript."}
-    )
-    assert resp.status_code == 200
-    assert resp.json()["transcript_status"] == "manual"
-
-
-def test_paste_empty_transcript_rejected(client: TestClient) -> None:
-    _add_provider(client)
-    _CURRENT_SCRIPT.set("resolve", ResolvedRef(kind="video", external_id="abc12345678"))
-    _CURRENT_SCRIPT.set("video", VideoInfo(external_id="abc12345678", title="T", published_at=_OLD))
-
-    created = client.post(
-        f"{API}/references", json={"urls": ["https://www.youtube.com/watch?v=abc12345678"]}
-    )
-    source_id = created.json()[0]["id"]
-    video_id = client.get(f"{API}/references/{source_id}/videos").json()[0]["id"]
-
-    resp = client.post(f"{API}/reference-videos/{video_id}/transcript", data={"text": "   "})
-    assert resp.status_code == 400
-
-
-def test_upload_transcript_file(client: TestClient) -> None:
-    _add_provider(client)
-    _CURRENT_SCRIPT.set("resolve", ResolvedRef(kind="video", external_id="abc12345678"))
-    _CURRENT_SCRIPT.set("video", VideoInfo(external_id="abc12345678", title="T", published_at=_OLD))
-
-    created = client.post(
-        f"{API}/references", json={"urls": ["https://www.youtube.com/watch?v=abc12345678"]}
-    )
-    source_id = created.json()[0]["id"]
-
-    resp = client.post(
-        f"{API}/references/{source_id}/transcripts",
-        files={"file": ("t.srt", b"1\n00:00:00,000 --> 00:00:01,000\nHello\n", "text/plain")},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["transcript_status"] == "manual"
-
-
-def test_upload_transcript_rejects_bad_extension(client: TestClient) -> None:
-    _add_provider(client)
-    _CURRENT_SCRIPT.set("resolve", ResolvedRef(kind="video", external_id="abc12345678"))
-    _CURRENT_SCRIPT.set("video", VideoInfo(external_id="abc12345678", title="T", published_at=_OLD))
-
-    created = client.post(
-        f"{API}/references", json={"urls": ["https://www.youtube.com/watch?v=abc12345678"]}
-    )
-    source_id = created.json()[0]["id"]
-
-    resp = client.post(
-        f"{API}/references/{source_id}/transcripts",
-        files={"file": ("t.mp4", b"not a transcript", "video/mp4")},
-    )
-    assert resp.status_code == 400
+    video = client.get(f"{API}/references/{source_id}/videos").json()[0]
+    assert video["deepdive_status"] == "none"
+    assert video["scene_breakdown"] == []
+    assert video["attention_notes"] == []

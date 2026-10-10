@@ -103,6 +103,17 @@ class Settings(BaseSettings):
     # because too many other videos also did well that month.
     reference_top_percentile: float = 0.10
     reference_top_multiplier_threshold: float = 3.0
+    # Deep-dive (auto transcript + scene/attention analysis) on a reference's
+    # best performers. Off by default — downloading third-party media via
+    # yt-dlp carries the same ToS-risk posture as unofficial transcripts and
+    # link-fetch below; the user opted in explicitly (2026-10-09 decision).
+    enable_reference_media_download: bool = False
+    # How many of a channel's TOP ("bombou") videos get the deep-dive, picked
+    # by highest outlier_score. A single-video reference always gets one.
+    reference_deepdive_top_n: int = 3
+    # Safety cap: a video longer than this is skipped (deepdive_status=failed
+    # with a clear reason) rather than downloaded/processed in full.
+    reference_deepdive_max_duration_s: int = 1200
     # N1 (Etapa 2): caps real search.list calls spent on "Descobrir assuntos
     # fortes" per day — search.list has its own 100-calls/day quota bucket
     # (D4), shared with everything else that might use it.

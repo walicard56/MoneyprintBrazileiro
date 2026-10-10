@@ -70,9 +70,9 @@ export default function Dashboard() {
             />
             <Step
               done={data.projects_total > 0}
-              text="Create a project (your channel/niche)"
-              to="/projects"
-              label="Create project"
+              text="Create a channel (your niche, style, voice)"
+              to="/canais"
+              label="Create channel"
             />
             <Step done={data.videos_total > 0} text="Generate your first video" to="/create" label="Create video" />
           </ol>

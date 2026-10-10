@@ -27,6 +27,7 @@ from app.agents.reference import (
 from app.core.config import settings
 from app.core.enums import (
     Capability,
+    DeepDiveStatus,
     LogLevel,
     ProfileStatus,
     ReferenceKind,
@@ -120,24 +121,25 @@ def _ingest_single_video(db: Session, source: ReferenceSource, fetch) -> None:
     info: VideoInfo = fetch("video", external_id=source.external_id).data
     source.title = info.title
     source.stats = {"n_videos": 1}
-    db.add(
-        ReferenceVideo(
-            source_id=source.id,
-            external_id=info.external_id,
-            title=info.title,
-            published_at=_parse_dt(info.published_at),
-            duration_s=info.duration_s,
-            views=info.views,
-            likes=info.likes,
-            comments=info.comments,
-            thumbnail_url=info.thumbnail_url,
-            role=ReferenceVideoRole.REPRESENTATIVE,
-            chapters=[c.model_dump() for c in extract_chapters(info.description)],
-            tags=info.tags,
-            license=info.license,
-        )
+    video = ReferenceVideo(
+        source_id=source.id,
+        external_id=info.external_id,
+        title=info.title,
+        published_at=_parse_dt(info.published_at),
+        duration_s=info.duration_s,
+        views=info.views,
+        likes=info.likes,
+        comments=info.comments,
+        thumbnail_url=info.thumbnail_url,
+        role=ReferenceVideoRole.REPRESENTATIVE,
+        chapters=[c.model_dump() for c in extract_chapters(info.description)],
+        tags=info.tags,
+        license=info.license,
     )
+    db.add(video)
     db.commit()
+
+    _dispatch_deepdive(db, [video])
 
 
 def _ingest_channel(db: Session, source: ReferenceSource, fetch) -> None:
@@ -222,6 +224,36 @@ def _ingest_channel(db: Session, source: ReferenceSource, fetch) -> None:
         stage="scoring_outliers",
         project_id=source.project_id,
     )
+
+    top_for_deepdive = sorted(
+        (r for r in rows if r.role == ReferenceVideoRole.TOP),
+        key=lambda r: r.outlier_score or 0.0,
+        reverse=True,
+    )[: settings.reference_deepdive_top_n]
+    _dispatch_deepdive(db, top_for_deepdive)
+
+
+def _dispatch_deepdive(db: Session, videos: list[ReferenceVideo]) -> None:
+    """Queues the deep-dive (download, transcript, scene/attention analysis)
+    for each of ``videos``, if ``MP_ENABLE_REFERENCE_MEDIA_DOWNLOAD`` is on.
+    No-ops cleanly otherwise — manual transcript entry has been removed, so
+    a video simply stays ``deepdive_status=none`` until the user opts in.
+
+    Marks each video ``pending`` and commits *before* dispatching so the
+    background thread/task (its own DB session) is guaranteed to see it.
+    """
+    if not settings.enable_reference_media_download or not videos:
+        return
+    for video in videos:
+        video.deepdive_status = DeepDiveStatus.PENDING
+    db.commit()
+
+    # Local import: app.orchestrator.dispatch imports ingest_reference from
+    # this module, so a module-level import here would be circular.
+    from app.orchestrator.dispatch import start_reference_deepdive
+
+    for video in videos:
+        start_reference_deepdive(video.id)
 
 
 def _run_style_analysis(db: Session, source: ReferenceSource, router: ProviderRouter) -> None:

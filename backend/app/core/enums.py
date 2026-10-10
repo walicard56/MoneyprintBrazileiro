@@ -215,6 +215,18 @@ class TranscriptStatus(str, Enum):
     DELETED = "deleted"
 
 
+class DeepDiveStatus(str, Enum):
+    """Lifecycle of a reference video's auto deep-dive (download, transcript,
+    scene/attention analysis) — off by default behind
+    ``MP_ENABLE_REFERENCE_MEDIA_DOWNLOAD``."""
+
+    NONE = "none"
+    PENDING = "pending"
+    RUNNING = "running"
+    READY = "ready"
+    FAILED = "failed"
+
+
 class ProfileStatus(str, Enum):
     """Lifecycle of a versioned style profile."""
 

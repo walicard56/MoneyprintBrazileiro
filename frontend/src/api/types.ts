@@ -312,6 +312,17 @@ export type ReferenceKind = "video" | "channel";
 export type ReferenceStatus = "pending" | "fetching" | "analyzing" | "ready" | "failed";
 export type ReferenceVideoRole = "top" | "bottom" | "representative" | "none";
 export type TranscriptStatus = "none" | "manual" | "fetched" | "deleted";
+export type DeepDiveStatus = "none" | "pending" | "running" | "ready" | "failed";
+
+export interface ReferenceVideoScene {
+  index: number;
+  start_s: number;
+  end_s: number;
+  wpm: number | null;
+  has_caption: boolean;
+  beat_role?: string;
+  vision: Record<string, unknown>;
+}
 export type ProfileStatus = "draft" | "active" | "archived";
 export type DirectionStatus = "new" | "used" | "dismissed";
 
@@ -355,6 +366,11 @@ export interface ReferenceVideo {
   role: ReferenceVideoRole;
   analysis: Record<string, unknown>;
   transcript_status: TranscriptStatus;
+  deepdive_status: DeepDiveStatus;
+  deepdive_stage: string;
+  deepdive_error: string;
+  scene_breakdown: ReferenceVideoScene[];
+  attention_notes: string[];
 }
 
 export interface StyleProfileItem {

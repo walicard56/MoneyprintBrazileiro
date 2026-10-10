@@ -526,8 +526,8 @@ export default function Create() {
       )}
 
       {/* Sticky generate bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/10 bg-night/80 backdrop-blur-xl lg:left-64">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4 md:px-8">
+      <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/10 bg-night/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-4 md:px-8">
           <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
             <Tag>{mode}</Tag>
             <span>{f.platform} · {f.aspect} · {f.durationText} · {f.runMode}</span>
